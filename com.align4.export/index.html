@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'self' data:">
+<title>4 倍数导出</title><link rel="stylesheet" href="css/panel.css"></head>
+<body><div class="app">
+<aside class="sidebar" aria-label="快捷导出目录">
+ <div class="brand"><div class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></div><strong>4 倍数导出</strong></div>
+ <div class="sidebar-heading"><span>快捷目录 <small id="presetCount">0</small></span><button id="addPreset" class="icon-button" title="添加快捷导出目录" aria-label="添加快捷导出目录">＋</button></div>
+ <div id="presets" class="preset-list"></div>
+ <div class="preset-pages"><button id="presetPrev" aria-label="上一页">‹</button><span id="presetPage">1 / 1</span><button id="presetNext" aria-label="下一页">›</button></div>
+ <div class="sidebar-bottom canvas-dock">
+  <section class="canvas-destination"><div class="canvas-destination-heading"><h2>整图导出</h2><button id="canvasFolder" class="text-button">＋ 添加</button></div><div class="folder-copy"><span class="folder-icon" aria-hidden="true"></span><div><strong id="canvasDirectoryName">先添加目录</strong><p id="canvasDirectory">与切图目录独立</p></div></div></section>
+  <button id="canvas" class="canvas-sidebar-export" title="导出整个画布到上方目录" disabled>导出整个画布 ↗</button>
+ </div>
+ <footer><span>v1.10.1</span><button id="restoreSize" class="text-button" title="恢复 760 × 620 的窗口内容尺寸">默认大小</button><button id="diagnose" class="text-button">诊断</button></footer>
+</aside>
+<main class="workspace">
+ <div class="workspace-content">
+  <section class="source"><div class="source-meta"><span>当前<span id="kind">选择对象</span></span><button id="refresh" class="refresh-button" title="重新检测尺寸" aria-label="重新检测尺寸">↻</button></div><h1 id="name">选择一个图层</h1><p id="original">请选择图层 / 图层组 / 画板</p></section>
+  <section class="filename-settings"><h2>文件命名</h2><div class="naming-fields"><div class="prefix-field"><div class="field-label-row"><label for="prefix">前缀</label><button id="clearPrefix" class="text-button">清空</button></div><input id="prefix" type="text" maxlength="32" placeholder="可留空" autocomplete="off" spellcheck="false"></div><div class="name-field"><label for="exportName">名称</label><input id="exportName" type="text" maxlength="120" placeholder="导出名称" autocomplete="off" spellcheck="false" disabled></div></div><div class="filename-preview"><strong id="fileName">选择对象后显示文件名</strong><button id="resetName" class="text-button" disabled>用图层名</button></div></section>
+  <section class="size-card"><div class="card-heading"><h2>输出尺寸</h2><details class="size-settings"><summary>调整</summary><div class="size-editor"><div class="dimensions"><label><span>宽度</span><input id="width" type="number" min="1" max="30000" step="1" placeholder="—" aria-label="自定义导出宽度"></label><span>×</span><label><span>高度</span><input id="height" type="number" min="1" max="30000" step="1" placeholder="—" aria-label="自定义导出高度"></label></div><div class="size-tools"><button id="align" class="pill-button" disabled>向上补齐 ↗</button><label>位置 <select id="anchor" aria-label="补边位置"><option value="center">居中</option><option value="topLeft">左上角</option></select></label></div><p id="padding">可自定义尺寸，新增区域透明。</p><button id="export" class="manual-export" disabled>按填写尺寸导出 ↗</button></div></details></div><div class="size-summary"><span id="sourceSize">— × —</span><span class="size-arrow">→</span><strong id="targetSize">— × —</strong><span>px</span></div><p class="size-note">向上补齐 · 居中透明补边</p></section>
+  <div id="status" class="status" role="status" aria-live="polite">正在启用自动识别…</div>
+ </div>
+ <div class="action-dock"><div class="action-heading"><h2>准备导出</h2><span>PNG</span></div>
+  <section class="destination"><div class="destination-heading"><span>保存到</span><button id="folder" class="text-button">更换</button></div><div class="folder-copy"><span class="folder-icon" aria-hidden="true"></span><div><strong id="directoryName">先选择导出目录</strong><p id="directory">尚未选择目录</p></div></div></section>
+  <button id="quick" class="primary" disabled>导出切图 ↗</button><p class="export-note">原图不缩放 · 同名自动编号</p>
+  <div class="feedback-slot"><section id="report" class="report" hidden aria-live="polite"><div class="report-header"><span id="reportIcon" class="report-icon">✓</span><div class="report-heading"><h2 id="reportTitle">已导出</h2><p id="reportSummary"></p></div><span id="reportSize" class="report-size"></span></div><button id="reportDetails" class="report-details-button" disabled>详情</button><div id="reportList" class="report-list" hidden></div></section><span class="feedback-placeholder">导出结果将在这里显示</span></div>
+  <p id="result" hidden></p><textarea id="debug" hidden readonly aria-label="诊断信息，可按 Ctrl+C 复制"></textarea>
+ </div>
+</main></div><script src="js/rules.js"></script><script src="js/panel.js"></script></body></html>

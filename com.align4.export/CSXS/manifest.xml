@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ExtensionManifest Version="7.0" ExtensionBundleId="com.align4.export" ExtensionBundleVersion="1.10.1" ExtensionBundleName="4 倍数导出">
+  <ExtensionList><Extension Id="com.align4.export.panel" Version="1.10.1"/></ExtensionList>
+  <ExecutionEnvironment>
+    <HostList><Host Name="PHXS" Version="[20.0,99.9]"/><Host Name="PHSP" Version="[20.0,99.9]"/></HostList>
+    <LocaleList><Locale Code="All"/></LocaleList>
+    <RequiredRuntimeList><RequiredRuntime Name="CSXS" Version="9.0"/></RequiredRuntimeList>
+  </ExecutionEnvironment>
+  <DispatchInfoList><Extension Id="com.align4.export.panel"><DispatchInfo>
+    <Resources><MainPath>./index.html</MainPath><ScriptPath>./host/host.jsx</ScriptPath><CEFCommandLine><Parameter>--enable-nodejs</Parameter></CEFCommandLine></Resources>
+    <Lifecycle><AutoVisible>true</AutoVisible></Lifecycle>
+    <UI><Type>Panel</Type><Menu>4 倍数导出</Menu><Geometry>
+      <Size><Height>620</Height><Width>760</Width></Size>
+      <MinSize><Height>500</Height><Width>420</Width></MinSize>
+      <MaxSize><Height>1200</Height><Width>1200</Width></MaxSize>
+    </Geometry></UI>
+  </DispatchInfo></Extension></DispatchInfoList>
+</ExtensionManifest>
