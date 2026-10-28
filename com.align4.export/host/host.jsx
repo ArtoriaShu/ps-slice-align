@@ -90,7 +90,7 @@ var Align4 = (function () {
         return json({ok:true, events:result});
     }
     function diagnose() {
-        try { return json({ok:true, data:{plugin:'1.10.1 native PNG', photoshop:String(app.version), selection:meta(), sizeSource:'实际原生 PNG 的 IHDR，不使用图层 bounds'}}); } catch (e) { return error(e); }
+        try { return json({ok:true, data:{plugin:'1.10.2 native PNG', photoshop:String(app.version), selection:meta(), sizeSource:'实际原生 PNG 的 IHDR，不使用图层 bounds'}}); } catch (e) { return error(e); }
     }
     return {selectionToken:selectionToken, describeSelection:describeSelection, describeDocument:describeDocument, startNative:startNative, startNativeCanvas:startNativeCanvas, chooseFolder:chooseFolder, openFolder:openFolder, eventIDs:eventIDs, diagnose:diagnose};
 }());

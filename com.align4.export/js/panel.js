@@ -4,7 +4,7 @@
   ids.forEach(function(id){el[id]=document.getElementById(id);});
   var rules=window.Align4Rules,bridge=window.__adobe_cep__,fs,path,os,png,pngWait,outputFiles,canvasExporter,outputDirectory='',canvasDirectory='',choosingFolder=false,presets=[],presetViews=[],presetPage=0,presetPageSize=(window.innerHeight&&window.innerHeight>=580)?3:2,quickRequest=null,canvasRequest=null,lastCanvas=null,lastExport=null,Buffer;
   var info=null,cache=null,dirty=false,editSequence=0,sequence=0,rendering=false,saving=false,checking=false,pending=false,pendingForce=false;
-  var namingToken=null,nameSource='',nameEdited=false;
+  var namingToken=null,nameSource='',nameEdited=false,nameDraft=null,nameValue='';
   var timer=null,eventMap={},registered=[],listeners=[],owned=[],retained=[],activeJob=null,lastNative=null,lastFailure=null,closing=false,extensionId='com.align4.export.panel',appId='PHXS',windowSizeRequest=null;
   function setText(node,text){if(node.textContent!==text){node.textContent=text;}}
   function message(text,kind){el.status.textContent=text;el.status.title=text;el.status.className='status '+(kind||((rendering||saving)?'working':''));}
@@ -38,9 +38,15 @@
   }
   function normalizedName(){return outputFiles?outputFiles.normalizeName(el.exportName.value):String(el.exportName.value||'');}
   function syncNaming(meta){
-    if(namingToken!==meta.token){namingToken=meta.token;nameEdited=false;}
+    if(namingToken!==meta.token||nameDraft){
+      namingToken=meta.token;
+      // A draft belongs to the selection observed when typing, not the last
+      // rendered thumbnail. Keep it while that lightweight query is pending.
+      nameEdited=!!nameDraft&&(nameDraft.pending||nameDraft.token===meta.token);
+      if(!nameEdited){nameDraft=null;}
+    }
     nameSource=outputFiles.normalizeName(meta.name);
-    if(!nameEdited){el.exportName.value=nameSource;}
+    if(!nameEdited){el.exportName.value=nameSource;nameValue=el.exportName.value;}
   }
   function sourceDescription(){
     el.original.textContent='原始尺寸 '+info.width+' × '+info.height+' px';el.original.title=el.original.textContent;
@@ -87,7 +93,7 @@
   }
   function settle(){rendering=false;checking=false;controls();if(pending&&!saving){schedule(pendingForce);}if(quickRequest&&!quickRequest.running){window.setTimeout(drainQuick,0);}if(canvasRequest&&!canvasRequest.running){window.setTimeout(drainCanvas,0);}}
   function fail(text){message(text,'error');el.result.textContent=text;showReport({message:text});}
-  function invalidate(){info=null;namingToken=null;nameSource='';nameEdited=false;el.exportName.value='';el.original.textContent='未取得原生 PNG 的实际尺寸';el.width.value='';el.height.value='';}
+  function invalidate(){info=null;namingToken=null;nameSource='';nameEdited=false;nameDraft=null;nameValue='';el.exportName.value='';el.original.textContent='未取得原生 PNG 的实际尺寸';el.width.value='';el.height.value='';}
   function detect(force,after){
     if(closing){return;}if(rendering||checking){pending=true;pendingForce=pendingForce||force;return;}
     checking=true;controls();
@@ -223,12 +229,17 @@
     if(quickRequest||canvasRequest||saving||choosingFolder||closing){return;}
     var list=uniqueDirectories(directories);if(!list.length){fail('请先选择或添加导出目录。');return;}
     var request={directories:list,prefix:String(el.prefix.value||''),name:normalizedName(),nameOwner:namingToken,owner:info?info.token:null,width:Number(el.width.value),height:Number(el.height.value),ready:false,running:false};
+    var draft=nameDraft;
     quickRequest=request;controls();
-    host('Align4.selectionToken()',function(current){
-      if(!current.ok){abortQuick(current.message);return;}request.token=current.token;
-      if(request.nameOwner!==request.token){request.name=null;}else if(!request.name){abortQuick('请填写导出名称。');return;}
-      if(request.owner!==request.token){request.width=0;request.height=0;}
-      request.ready=true;drainQuick();
+    whenNameBound(draft,function(){
+      if(draft&&draft.error){abortQuick(draft.error);return;}
+      if(draft){request.nameOwner=draft.token;}
+      host('Align4.selectionToken()',function(current){
+        if(!current.ok){abortQuick(current.message);return;}request.token=current.token;
+        if(request.nameOwner!==request.token){request.name=null;}else if(!request.name){abortQuick('请填写导出名称。');return;}
+        if(request.owner!==request.token){request.width=0;request.height=0;}
+        request.ready=true;drainQuick();
+      });
     });
   }
   function endCanvas(error,record){
@@ -316,12 +327,27 @@
   function persistPrefix(){try{window.localStorage.setItem('align4-filename-prefix',el.prefix.value);}catch(e){}controls();}
   // Older CEP/IME combinations may deliver compositionend or keyup without input.
   // Each route reads the live field; no host render or manual refresh is required.
-  function commitName(){nameEdited=true;controls();}
+  function whenNameBound(draft,callback){if(draft&&draft.pending){draft.waiters.push(callback);}else{callback();}}
+  function commitName(){
+    // blur/keyup also fire without edits. Never attach an old layer's name to
+    // a new selection merely because focus returned to the panel.
+    if(el.exportName.value===nameValue){return;}
+    nameValue=el.exportName.value;nameEdited=true;
+    var draft={pending:true,token:null,error:null,waiters:[]};nameDraft=draft;controls();
+    host('Align4.selectionToken()',function(current){
+      draft.pending=false;draft.token=current.ok?current.token:null;draft.error=current.ok?null:current.message;
+      if(nameDraft===draft){
+        if(!current.ok){message(current.message,'error');}
+        else{schedule(false);}
+      }
+      draft.waiters.forEach(function(callback){callback();});draft.waiters=[];
+    });
+  }
   ['input','change','compositionend','keyup','blur'].forEach(function(type){
     el.prefix.addEventListener(type,persistPrefix);
     el.exportName.addEventListener(type,commitName);
   });
-  el.resetName.addEventListener('click',function(){if(el.resetName.disabled){return;}nameEdited=false;el.exportName.value=nameSource;controls();el.exportName.focus();});
+  el.resetName.addEventListener('click',function(){if(el.resetName.disabled){return;}nameEdited=false;nameDraft=null;el.exportName.value=nameSource;nameValue=el.exportName.value;controls();el.exportName.focus();});
   el.clearPrefix.addEventListener('click',function(){if(el.clearPrefix.disabled){return;}el.prefix.value='';persistPrefix();el.prefix.focus();});
   el.align.addEventListener('click',function(){if(info){el.width.value=rules.ceil4(Math.max(info.width,Number(el.width.value)||0));el.height.value=rules.ceil4(Math.max(info.height,Number(el.height.value)||0));controls();}});
   el.export.addEventListener('click',save);el.canvas.addEventListener('click',quickCanvas);

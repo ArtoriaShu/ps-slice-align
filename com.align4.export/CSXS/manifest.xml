@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<ExtensionManifest Version="7.0" ExtensionBundleId="com.align4.export" ExtensionBundleVersion="1.10.1" ExtensionBundleName="4 倍数导出">
-  <ExtensionList><Extension Id="com.align4.export.panel" Version="1.10.1"/></ExtensionList>
+<ExtensionManifest Version="7.0" ExtensionBundleId="com.align4.export" ExtensionBundleVersion="1.10.2" ExtensionBundleName="4 倍数导出">
+  <ExtensionList><Extension Id="com.align4.export.panel" Version="1.10.2"/></ExtensionList>
   <ExecutionEnvironment>
     <HostList><Host Name="PHXS" Version="[20.0,99.9]"/><Host Name="PHSP" Version="[20.0,99.9]"/></HostList>
     <LocaleList><Locale Code="All"/></LocaleList>
