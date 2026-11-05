@@ -128,7 +128,7 @@ var Align4 = (function () {
         return json({ok:true, events:result});
     }
     function diagnose() {
-        try { return json({ok:true, data:{plugin:'1.11.0 native PNG', photoshop:String(app.version), selection:meta(), sizeSource:'实际原生 PNG 的 IHDR，不使用图层 bounds'}}); } catch (e) { return error(e); }
+        try { return json({ok:true, data:{plugin:'1.11.1 native PNG', photoshop:String(app.version), selection:meta(), sizeSource:'实际原生 PNG 的 IHDR，不使用图层 bounds'}}); } catch (e) { return error(e); }
     }
     return {selectionToken:selectionToken, describeSelection:describeSelection, describeDocument:describeDocument, startNative:startNative, startNativeCanvas:startNativeCanvas, convertSuperPNG:convertSuperPNG, chooseFolder:chooseFolder, openFolder:openFolder, eventIDs:eventIDs, diagnose:diagnose};
 }());

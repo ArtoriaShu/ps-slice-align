@@ -8,7 +8,7 @@ const path = require('node:path');
 const outputFiles = require('../com.align4.export/js/output-files');
 
 function panel(options = {}) {
-  const nodes = {}, timers = new Map(), queries = [], saved = [], encodings = [];
+  const nodes = {}, timers = new Map(), queries = [], saved = [], encodings = [], commands = [];
   let selected = 'A', tick = 0, dir = 0;
   function node() {
     return {value:'', textContent:'', listeners:{}, appendChild(){}, removeChild(){},
@@ -17,6 +17,7 @@ function panel(options = {}) {
   }
   function meta(token = selected) {return {ok:true, token, name:'PS-' + token, kind:'图层', revision:'1'};}
   const bridge = {evalScript(script, callback) {
+    commands.push(script);
     if(script === 'Align4.selectionToken()') {
       // Capture selection at query time, but deliver later to exercise races.
       const result = meta(); queries.push(() => callback(JSON.stringify(result)));
@@ -35,9 +36,9 @@ function panel(options = {}) {
   });
   let source = fs.readFileSync(path.join(__dirname,'../com.align4.export/js/panel.js'),'utf8');
   source = source.slice(0,source.lastIndexOf('  try{\n    var rq=')) + `
-    window.testPanel={syncNaming:syncNaming,detect:detect,quickExport:quickExport,save:save,quickCanvas:quickCanvas,
+    window.testPanel={syncNaming:syncNaming,detect:detect,quickExport:quickExport,save:save,quickCanvas:quickCanvas,startPolling:startPolling,onEvent:onEvent,cleanup:cleanup,
       configure:function(o){fs=o.fs;path=o.path;os=o.os;png=o.png;pngWait=o.pngWait;
-        outputFiles=o.outputFiles;superPNG=o.superPNG;canvasExporter=o.canvasExporter;canvasDirectory='/canvas';outputDirectory='/exports';
+        outputFiles=o.outputFiles;superPNG=o.superPNG;canvasExporter=o.canvasExporter;canvasDirectory='/canvas';outputDirectory='/exports';eventMap={'1':false,'2':true};
         info={token:'A',name:'PS-A',width:4,height:4,revision:'1'};cache={data:'png'};
         el.width.value=4;el.height.value=4;syncNaming(info);},
       state:function(){return {name:el.exportName.value,token:namingToken,request:quickRequest};}};
@@ -53,7 +54,9 @@ function panel(options = {}) {
     outputFiles:{...outputFiles,save(fs,path,png,directory,name,data){saved.push(name);if(options.superPNG)assert.equal(data,'SuperPNG bytes');return {path:directory+'/'+name+'.png',width:4,height:4};}}
   });
   nodes.superPNG.checked=!!options.superPNG;
-  return {api,nodes,saved,encodings,select(token){selected=token;},
+  return {api,nodes,saved,encodings,commands,select(token){selected=token;},
+    poll(){const entry=[...timers].find(([,v])=>v.delay>=1200&&v.delay<25000);assert.ok(entry);timers.delete(entry[0]);entry[1].fn();},
+    hidden(value){context.document.hidden=value;},
     edit(value,type='input'){nodes.exportName.value=value;nodes.exportName.fire(type);},
     reply(index=0){assert.ok(queries.length);queries.splice(index,1)[0]();},
     flush(){let count=0;while(true){const entry=[...timers].find(([,v])=>v.delay<1000);if(!entry)break;
@@ -165,4 +168,51 @@ test('canvas conversion failure produces no final file',()=>{
 test('ordinary canvas export skips SuperPNG',()=>{
   const p=panel();p.api.quickCanvas();p.flush();
   assert.equal(p.encodings.length,0);assert.equal(p.saved.length,1);
+});
+
+test('selection polling recovers lost notifications without starting native PNG export',()=>{
+  const p=panel();p.api.startPolling();p.select('B');p.poll();
+  assert.equal(p.nodes.name.textContent,'PS-B');assert.equal(p.nodes.exportName.value,'PS-B');
+  p.select('C');p.poll();assert.equal(p.nodes.name.textContent,'PS-C');
+  assert.equal(p.commands.filter(s=>s.startsWith('Align4.startNative')).length,0);
+});
+
+test('typing and refresh only query metadata; target size survives repeated polling',()=>{
+  const p=panel();p.select('B');p.api.detect(false);p.edit('custom-B');p.reply();p.flush();
+  p.nodes.width.value=100;p.nodes.height.value=104;p.nodes.refresh.fire('click');
+  p.api.startPolling();p.poll();p.poll();
+  assert.equal(p.nodes.width.value,100);assert.equal(p.nodes.height.value,104);
+  assert.equal(p.nodes.exportName.value,'custom-B');
+  assert.equal(p.commands.filter(s=>s.startsWith('Align4.startNative')).length,0);
+});
+
+test('event bursts coalesce and update selection without rendering',()=>{
+  const p=panel();p.select('B');
+  for(let i=0;i<100;i++)p.api.onEvent({data:'ver1,{"eventID":1}'});
+  p.flush();assert.equal(p.nodes.name.textContent,'PS-B');
+  assert.equal(p.commands.filter(s=>s==='Align4.describeSelection()').length,1);
+  assert.equal(p.commands.filter(s=>s.startsWith('Align4.startNative')).length,0);
+});
+
+test('polling pauses while hidden or converting SuperPNG',()=>{
+  let complete;const p=panel({superPNG:true,encode(callback){complete=callback;}});
+  p.api.startPolling();p.hidden(true);p.poll();assert.equal(p.commands.length,0);
+  p.hidden(false);p.api.quickExport([{path:'/preset'}]);p.reply();p.flush();
+  const count=p.commands.length;p.poll();assert.equal(p.commands.length,count);
+  complete(null,'SuperPNG bytes');p.flush();assert.equal(p.saved.length,1);
+});
+
+test('manual size export works after lightweight recognition without prior rendering',()=>{
+  const p=panel();p.select('B');p.api.detect(false);
+  p.nodes.width.value=8;p.nodes.height.value=8;p.api.save();p.flush();
+  assert.deepEqual(p.saved,['PS-B']);
+  assert.equal(p.commands.filter(s=>s.startsWith('Align4.startNative(')).length,1);
+});
+
+test('quick export preserves a target size entered after lightweight recognition',()=>{
+  const p=panel();p.select('B');p.api.detect(false);
+  p.nodes.width.value=100;p.nodes.height.value=104;
+  p.api.quickExport([{path:'/preset'}]);p.reply();p.flush();
+  assert.equal(p.nodes.width.value,100);assert.equal(p.nodes.height.value,104);
+  assert.deepEqual(p.saved,['PS-B']);
 });

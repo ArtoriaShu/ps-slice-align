@@ -5,7 +5,7 @@
   var rules=window.Align4Rules,bridge=window.__adobe_cep__,fs,path,os,png,pngWait,outputFiles,canvasExporter,superPNG,outputDirectory='',canvasDirectory='',choosingFolder=false,presets=[],presetViews=[],presetPage=0,presetPageSize=(window.innerHeight&&window.innerHeight>=580)?3:2,quickRequest=null,canvasRequest=null,lastCanvas=null,lastExport=null,Buffer;
   var info=null,cache=null,dirty=false,editSequence=0,sequence=0,rendering=false,saving=false,checking=false,pending=false,pendingForce=false;
   var namingToken=null,nameSource='',nameEdited=false,nameDraft=null,nameValue='';
-  var timer=null,eventMap={},registered=[],listeners=[],owned=[],retained=[],activeJob=null,lastNative=null,lastFailure=null,closing=false,extensionId='com.align4.export.panel',appId='PHXS',windowSizeRequest=null;
+  var timer=null,pollTimer=null,pollDelay=1200,eventMap={},registered=[],listeners=[],owned=[],retained=[],activeJob=null,lastNative=null,lastFailure=null,closing=false,extensionId='com.align4.export.panel',appId='PHXS',windowSizeRequest=null;
   function setText(node,text){if(node.textContent!==text){node.textContent=text;}}
   function message(text,kind){el.status.textContent=text;el.status.title=text;el.status.className='status '+(kind||((rendering||saving)?'working':''));}
   function showReport(record){
@@ -62,7 +62,7 @@
     setText(el.quick,quickRequest?'导出中…':outputDirectory?'导出切图 ↗':'先选择导出目录');el.quick.title=outputDirectory;el.directoryName.textContent=outputDirectory?(path.basename(outputDirectory)||outputDirectory):'先选择导出目录';el.directoryName.title=outputDirectory;
     var pageCount=Math.max(1,Math.ceil(presets.length/presetPageSize));el.presetPrev.disabled=blocked||presetPage===0;el.presetNext.disabled=blocked||presetPage>=pageCount-1;el.presetPage.textContent=(presetPage+1)+' / '+pageCount;
     presetViews.forEach(function(v){v.quick.disabled=quickBlocked;v.name.disabled=blocked;v.remove.disabled=blocked;});
-    el.align.disabled=!info||blocked;el.export.disabled=!info||!outputDirectory||blocked||nameMissing||!rules.valid(Number(el.width.value),Number(el.height.value),info.width,info.height);
+    el.align.disabled=!info||blocked;el.export.disabled=!namingToken||!outputDirectory||blocked||nameMissing||!rules.valid(Number(el.width.value),Number(el.height.value),info?info.width:1,info?info.height:1);
     el.width.disabled=blocked;el.height.disabled=blocked;el.anchor.disabled=blocked;
     // Metadata notifications can arrive as focus returns from the CEP text editor.
     // Keep typing intact during the debounce/query; lock only real render/save work.
@@ -88,24 +88,33 @@
   function schedule(force){
     if(canvasRequest){pending=true;pendingForce=pendingForce||!!force;return;}
     if(closing||saving||choosingFolder){return;}pending=true;pendingForce=pendingForce||!!force;controls();
-    if(document.hidden){return;}if(timer!==null){window.clearTimeout(timer);}
+    if(document.hidden){return;}if(timer!==null){return;}
     timer=window.setTimeout(function(){timer=null;if(rendering||checking){return;}var f=pendingForce;pending=false;pendingForce=false;detect(f);},220);
   }
   function settle(){rendering=false;checking=false;controls();if(pending&&!saving){schedule(pendingForce);}if(quickRequest&&!quickRequest.running){window.setTimeout(drainQuick,0);}if(canvasRequest&&!canvasRequest.running){window.setTimeout(drainCanvas,0);}}
   function fail(text){message(text,'error');el.result.textContent=text;showReport({message:text});}
   function invalidate(){info=null;namingToken=null;nameSource='';nameEdited=false;nameDraft=null;nameValue='';el.exportName.value='';el.original.textContent='未取得原生 PNG 的实际尺寸';el.width.value='';el.height.value='';}
   function detect(force,after){
-    if(closing){return;}if(rendering||checking){pending=true;pendingForce=pendingForce||force;return;}
+    if(closing){return;}if(!force&&(saving||canvasRequest||choosingFolder)){return;}if(rendering||checking){pending=true;pendingForce=pendingForce||force;return;}
     checking=true;controls();
     host('Align4.describeSelection()',function(meta){
-      if(!meta.ok){invalidate();pending=false;pendingForce=false;settle();fail(meta.message);if(after){after(false);}return;}
+      if(!meta.ok){pollDelay=5000;invalidate();pending=false;pendingForce=false;settle();if(force){fail(meta.message);}else{message(meta.message,'warning');}if(after){after(false);}return;}
+      pollDelay=1200;
+      var selectionChanged=namingToken!==meta.token;
       syncNaming(meta);
-      if(!force&&lastFailure&&lastFailure.token===meta.token){settle();fail(lastFailure.message);if(after){after(false);}return;}
-      // Selection notifications are hints. They are not evidence of a new layer.
-      if(cache&&info&&meta.token===info.token&&!force){
-        if(meta.revision!=null&&info.revision!=null&&meta.revision!==info.revision){dirty=true;}
-        info.name=meta.name;sourceDescription();
-        settle();if(after){after(true);}return;
+      el.kind.textContent=meta.kind;el.name.textContent=meta.name;el.name.title=meta.name;
+      // Selection tracking must never invoke Generator. Actual dimensions are
+      // measured only for an explicit export, from the resulting PNG.
+      if(!force){
+        if(!info||info.token!==meta.token){
+          info=null;cache=null;dirty=false;if(selectionChanged){el.width.value='';el.height.value='';}
+          el.original.textContent='已识别当前对象，导出时读取实际尺寸';
+          el.padding.textContent='可填写目标尺寸；实际尺寸在导出时校验。';
+        }else{
+          if(meta.revision!=null&&info.revision!=null&&meta.revision!==info.revision){dirty=true;}
+          info.name=meta.name;sourceDescription();
+        }
+        settle();if(!info){message('已识别，可直接输入名称并导出。','ok');}if(after){after(true);}return;
       }
       lastFailure=null;var requestEdit=editSequence;
       checking=false;rendering=true;controls();el.kind.textContent=meta.kind;el.name.textContent=meta.name;el.name.title=meta.name;message('正在读取选中对象的尺寸…','working');
@@ -222,8 +231,8 @@
     });
   }
   function save(){
-    if(!info||!cache||!outputDirectory||rendering||checking||saving||pending||choosingFolder||quickRequest||canvasRequest){return;}
-    var token=info.token,w=Number(el.width.value),h=Number(el.height.value),directory=outputDirectory,prefix=String(el.prefix.value||''),name=normalizedName(),useSuperPNG=!!el.superPNG.checked;
+    if(!namingToken||!outputDirectory||rendering||checking||saving||pending||choosingFolder||quickRequest||canvasRequest){return;}
+    var token=namingToken,w=Number(el.width.value),h=Number(el.height.value),directory=outputDirectory,prefix=String(el.prefix.value||''),name=normalizedName(),useSuperPNG=!!el.superPNG.checked;
     if(!name){fail('请填写导出名称。');return;}
     detect(true,function(ok){
       if(!ok){return;}
@@ -248,7 +257,7 @@
   function quickExport(directories){
     if(quickRequest||canvasRequest||saving||choosingFolder||closing){return;}
     var list=uniqueDirectories(directories);if(!list.length){fail('请先选择或添加导出目录。');return;}
-    var request={directories:list,superPNG:!!el.superPNG.checked,prefix:String(el.prefix.value||''),name:normalizedName(),nameOwner:namingToken,owner:info?info.token:null,width:Number(el.width.value),height:Number(el.height.value),ready:false,running:false};
+    var request={directories:list,superPNG:!!el.superPNG.checked,prefix:String(el.prefix.value||''),name:normalizedName(),nameOwner:namingToken,owner:info?info.token:namingToken,width:Number(el.width.value),height:Number(el.height.value),ready:false,running:false};
     var draft=nameDraft;
     quickRequest=request;controls();
     whenNameBound(draft,function(){
@@ -342,7 +351,7 @@
       controls();if(!r.ok&&!r.cancelled){fail(r.message);}schedule(false);
     },0);
   });
-  el.refresh.addEventListener('click',function(){if(timer!==null){window.clearTimeout(timer);timer=null;}pending=false;pendingForce=false;detect(true);});
+  el.refresh.addEventListener('click',function(){if(timer!==null){window.clearTimeout(timer);timer=null;}pending=false;pendingForce=false;detect(false);});
   el.width.addEventListener('input',controls);el.width.addEventListener('change',controls);el.height.addEventListener('input',controls);el.height.addEventListener('change',controls);el.anchor.addEventListener('change',controls);
   el.superPNG.addEventListener('change',function(){try{window.localStorage.setItem('align4-superpng',el.superPNG.checked?'1':'0');}catch(e){}controls();});
   function persistPrefix(){try{window.localStorage.setItem('align4-filename-prefix',el.prefix.value);}catch(e){}controls();}
@@ -380,23 +389,31 @@
   function onEvent(event){
     var data;try{data=typeof event.data==='object'?event.data:JSON.parse(String(event.data).replace(/^ver\d+,/,''));}catch(e){return;}
     var id=String(data.eventID||data.eventId||data.eventid);if(!Object.prototype.hasOwnProperty.call(eventMap,id)){return;}
-    if(eventMap[id]){if(/"_ref"\s*:\s*"application"/.test(JSON.stringify(data))){return;}dirty=true;editSequence++;if(!rendering&&!saving){controls();}return;}
+    if(eventMap[id]){if(/"_ref"\s*:\s*"application"/.test(JSON.stringify(data))){return;}dirty=true;editSequence++;if(!rendering&&!saving){schedule(false);}return;}
     if(saving){sequence++;pending=true;return;}sequence++;schedule(false);
   }
   function onDocument(){if(!saving){sequence++;schedule(false);}}
+  function startPolling(){
+    if(closing||pollTimer!==null){return;}
+    pollTimer=window.setTimeout(function(){
+      pollTimer=null;
+      if(!document.hidden&&!rendering&&!checking&&!saving&&!choosingFolder&&!quickRequest&&!canvasRequest&&timer===null){detect(false);}
+      startPolling();
+    },pollDelay);
+  }
   function register(){
     try{if(bridge.getExtensionId){extensionId=bridge.getExtensionId()||extensionId;}if(bridge.getHostEnvironment){appId=JSON.parse(bridge.getHostEnvironment()).appId||appId;}
       var type='com.adobe.PhotoshopJSONCallback'+extensionId;bridge.addEventListener(type,onEvent);listeners.push([type,onEvent]);bridge.addEventListener('documentAfterActivate',onDocument);listeners.push(['documentAfterActivate',onDocument]);
       host('Align4.eventIDs()',function(r){if(!r.ok){fail(r.message);return;}r.events.forEach(function(e){eventMap[String(e.id)]=!!e.edit;dispatch('com.adobe.PhotoshopRegisterEvent',e.id);registered.push(e.id);});schedule(false);});
     }catch(e){fail('自动识别注册失败，可点击检测。'+String(e.message||e));}
   }
-  function cleanup(){closing=true;if(canvasRequest&&canvasRequest.job){canvasRequest.job.cancel();}if(activeJob&&activeJob.wait){activeJob.wait.cancel();}if(timer!==null){window.clearTimeout(timer);}registered.forEach(function(id){try{dispatch('com.adobe.PhotoshopUnRegisterEvent',id);}catch(e){}});listeners.forEach(function(e){try{bridge.removeEventListener(e[0],e[1]);}catch(x){}});owned.slice().forEach(clean);}
+  function cleanup(){closing=true;if(pollTimer!==null){window.clearTimeout(pollTimer);pollTimer=null;}if(canvasRequest&&canvasRequest.job){canvasRequest.job.cancel();}if(activeJob&&activeJob.wait){activeJob.wait.cancel();}if(timer!==null){window.clearTimeout(timer);}registered.forEach(function(id){try{dispatch('com.adobe.PhotoshopUnRegisterEvent',id);}catch(e){}});listeners.forEach(function(e){try{bridge.removeEventListener(e[0],e[1]);}catch(x){}});owned.slice().forEach(clean);}
   window.addEventListener('beforeunload',cleanup);document.addEventListener('visibilitychange',function(){if(!document.hidden){schedule(false);}});
   try{
     var rq=window.cep_node&&window.cep_node.require?window.cep_node.require:window.require;if(!rq&&typeof require==='function'){rq=require;}if(!rq){throw new Error('CEP Node 未启用。');}
     fs=rq('fs');path=rq('path');os=rq('os');Buffer=rq('buffer').Buffer;
     var base=decodeURI(bridge.getSystemPath('extension')).replace(/^file:\/\//,'');if(/^\/[A-Za-z]:/.test(base)){base=base.slice(1);}
     rules=window.Align4Rules||rq(path.join(base,'js','rules.js'));if(!rules||typeof rules.valid!=='function'||typeof rules.ceil4!=='function'){throw new Error('尺寸计算模块未正确加载。');}window.Align4Rules=rules;
-    png=rq(path.join(base,'js','png-padding.js'));pngWait=rq(path.join(base,'js','native-png-wait.js'));outputFiles=rq(path.join(base,'js','output-files.js'));canvasExporter=rq(path.join(base,'js','canvas-export.js'));superPNG=rq(path.join(base,'js','superpng.js'));try{el.superPNG.checked=window.localStorage.getItem('align4-superpng')==='1';outputDirectory=window.localStorage.getItem('align4-export-directory')||'';canvasDirectory=window.localStorage.getItem('align4-canvas-directory')||'';el.prefix.value=(window.localStorage.getItem('align4-filename-prefix')||'').slice(0,32);}catch(e){}el.directory.textContent=outputDirectory||'尚未选择目录';el.directory.title=outputDirectory;try{var savedPresets=JSON.parse(window.localStorage.getItem('align4-directory-presets')||'[]');if(Array.isArray(savedPresets)){savedPresets.forEach(function(p){if(p&&typeof p.path==='string'&&p.path){presets.push({path:p.path,name:typeof p.name==='string'?p.name:path.basename(p.path)});}});}}catch(e){}renderPresets();restoreSize(false);controls();register();
+    png=rq(path.join(base,'js','png-padding.js'));pngWait=rq(path.join(base,'js','native-png-wait.js'));outputFiles=rq(path.join(base,'js','output-files.js'));canvasExporter=rq(path.join(base,'js','canvas-export.js'));superPNG=rq(path.join(base,'js','superpng.js'));try{el.superPNG.checked=window.localStorage.getItem('align4-superpng')==='1';outputDirectory=window.localStorage.getItem('align4-export-directory')||'';canvasDirectory=window.localStorage.getItem('align4-canvas-directory')||'';el.prefix.value=(window.localStorage.getItem('align4-filename-prefix')||'').slice(0,32);}catch(e){}el.directory.textContent=outputDirectory||'尚未选择目录';el.directory.title=outputDirectory;try{var savedPresets=JSON.parse(window.localStorage.getItem('align4-directory-presets')||'[]');if(Array.isArray(savedPresets)){savedPresets.forEach(function(p){if(p&&typeof p.path==='string'&&p.path){presets.push({path:p.path,name:typeof p.name==='string'?p.name:path.basename(p.path)});}});}}catch(e){}renderPresets();restoreSize(false);controls();register();startPolling();
   }catch(e){controls();fail('文件处理模块未加载，请重启 PS 并确认新版安装成功。'+String(e.message||e));}
 }());
