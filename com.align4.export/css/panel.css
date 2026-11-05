@@ -66,3 +66,7 @@ button:focus,summary:focus,input:focus,select:focus{outline-color:#c5d2e8}
 .workspace-content{display:flex;flex-direction:column;justify-content:space-between;padding-bottom:8px}
 .workspace-content>.source,.workspace-content>.filename-settings,.workspace-content>.size-card,.workspace-content>.status{flex-shrink:0}
 .filename-settings,.size-card{margin-top:0}.status{margin-top:0}
+.export-options{display:flex;align-items:center;justify-content:space-between;gap:8px;height:25px;font-size:11px;color:var(--muted)}
+.superpng-option{display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap}
+.superpng-option input{width:13px;height:13px;margin:0;flex-shrink:0}
+@media(max-height:580px){.export-options{height:21px}}

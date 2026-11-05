@@ -36,15 +36,22 @@ exports.run=function(o,request,callback){
       var name=request.name===null?o.outputFiles.normalizeName(meta.name):request.name;
       if(!name){throw new Error('请先在面板填写导出名称。');}
       var data=o.png.pad(result.data,w,h,request.anchor),exportName=o.outputFiles.nameFor(request.prefix,name);
-      record={scope:'canvas',name:meta.name,width:w,height:h,originalWidth:meta.width,originalHeight:meta.height,prefix:request.prefix,fileName:'',successes:[],errors:[]};
-      state.phase='saving';
-      request.directories.forEach(function(target){
-        try{var output=o.outputFiles.save(o.fs,o.path,o.png,target.path,exportName,data);output.directory=target.path;output.label=target.name;record.successes.push(output);}
-        catch(e){record.errors.push({directory:target.path,label:target.name,message:String(e.message||e)});}
-      });
-      if(record.successes.length){record.fileName=o.path.basename(record.successes[0].path);}
+      record={scope:'canvas',encoder:request.superPNG?'SuperPNG':'PNG',name:meta.name,width:w,height:h,originalWidth:meta.width,originalHeight:meta.height,prefix:request.prefix,fileName:'',successes:[],errors:[]};
     }catch(e){finish(e);return;}
-    finish(null,record);
+    state.phase=request.superPNG?'superpng':'saving';
+    o.encodePNG(data,request.superPNG,function(error,encoded){
+      if(finished){return;}
+      if(error){finish(error);return;}
+      verify(function(){
+        state.phase='saving';
+        request.directories.forEach(function(target){
+          try{var output=o.outputFiles.save(o.fs,o.path,o.png,target.path,exportName,encoded);output.directory=target.path;output.label=target.name;record.successes.push(output);}
+          catch(e){record.errors.push({directory:target.path,label:target.name,message:String(e.message||e)});}
+        });
+        if(record.successes.length){record.fileName=o.path.basename(record.successes[0].path);}
+        finish(null,record);
+      });
+    });
   }
   function attempt(number){
     state.attempt=number;state.phase='command';

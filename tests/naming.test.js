@@ -7,8 +7,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const outputFiles = require('../com.align4.export/js/output-files');
 
-function panel() {
-  const nodes = {}, timers = new Map(), queries = [], saved = [];
+function panel(options = {}) {
+  const nodes = {}, timers = new Map(), queries = [], saved = [], encodings = [];
   let selected = 'A', tick = 0, dir = 0;
   function node() {
     return {value:'', textContent:'', listeners:{}, appendChild(){}, removeChild(){},
@@ -21,7 +21,8 @@ function panel() {
       // Capture selection at query time, but deliver later to exercise races.
       const result = meta(); queries.push(() => callback(JSON.stringify(result)));
     } else if(script === 'Align4.describeSelection()') callback(JSON.stringify(meta()));
-    else if(script.startsWith('Align4.startNative(')) callback('{"ok":true}');
+    else if(script === 'Align4.describeDocument()') callback(JSON.stringify({...meta('canvas'),width:4,height:4}));
+    else if(script.startsWith('Align4.startNative(')||script.startsWith('Align4.startNativeCanvas(')) callback('{"ok":true}');
     else throw Error(script);
   }};
   const context = vm.createContext({
@@ -34,9 +35,9 @@ function panel() {
   });
   let source = fs.readFileSync(path.join(__dirname,'../com.align4.export/js/panel.js'),'utf8');
   source = source.slice(0,source.lastIndexOf('  try{\n    var rq=')) + `
-    window.testPanel={syncNaming:syncNaming,detect:detect,quickExport:quickExport,
+    window.testPanel={syncNaming:syncNaming,detect:detect,quickExport:quickExport,save:save,quickCanvas:quickCanvas,
       configure:function(o){fs=o.fs;path=o.path;os=o.os;png=o.png;pngWait=o.pngWait;
-        outputFiles=o.outputFiles;outputDirectory='/exports';
+        outputFiles=o.outputFiles;superPNG=o.superPNG;canvasExporter=o.canvasExporter;canvasDirectory='/canvas';outputDirectory='/exports';
         info={token:'A',name:'PS-A',width:4,height:4,revision:'1'};cache={data:'png'};
         el.width.value=4;el.height.value=4;syncNaming(info);},
       state:function(){return {name:el.exportName.value,token:namingToken,request:quickRequest};}};
@@ -44,12 +45,15 @@ function panel() {
   vm.runInContext(source,context);
   const api = context.window.testPanel;
   api.configure({path, os:{tmpdir:()=>'/tmp'},
+    superPNG:{encode(o,data,enabled,callback){encodings.push(data);options.encode?options.encode(callback):callback(null,'SuperPNG bytes');}},
+    canvasExporter:require('../com.align4.export/js/canvas-export'),
     fs:{mkdtempSync:()=>'/tmp/mock-'+(++dir),existsSync:()=>false},
     png:{pad:()=>Buffer.from('png')},
     pngWait:{wait(options,directory,callback){callback(null,{data:'png',measured:{width:4,height:4,depth:8,color:6}});}},
-    outputFiles:{...outputFiles,save(fs,path,png,directory,name){saved.push(name);return {path:directory+'/'+name+'.png',width:4,height:4};}}
+    outputFiles:{...outputFiles,save(fs,path,png,directory,name,data){saved.push(name);if(options.superPNG)assert.equal(data,'SuperPNG bytes');return {path:directory+'/'+name+'.png',width:4,height:4};}}
   });
-  return {api,nodes,saved,select(token){selected=token;},
+  nodes.superPNG.checked=!!options.superPNG;
+  return {api,nodes,saved,encodings,select(token){selected=token;},
     edit(value,type='input'){nodes.exportName.value=value;nodes.exportName.fire(type);},
     reply(index=0){assert.ok(queries.length);queries.splice(index,1)[0]();},
     flush(){let count=0;while(true){const entry=[...timers].find(([,v])=>v.delay<1000);if(!entry)break;
@@ -114,4 +118,51 @@ test('reset to layer name cancels an outstanding custom-name query', () => {
   p.reply();p.flush();
   p.api.quickExport([{path:'/exports'}]);p.reply();p.flush();
   assert.deepEqual(p.saved,['PS-A']);
+});
+
+for(const route of ['quick','manual','canvas']){
+  test(route+' export routes padded data through SuperPNG before saving',()=>{
+    const p=panel({superPNG:true});
+    if(route==='quick'){p.api.quickExport([{path:'/preset'}]);p.reply();}
+    else if(route==='manual')p.api.save();
+    else p.api.quickCanvas();
+    p.flush();assert.equal(p.encodings.length,1);assert.equal(p.saved.length,1);
+    assert.equal(p.encodings[0].toString(),'png');
+  });
+}
+
+test('queued export snapshots the SuperPNG option and keeps controls locked until encoding finishes',()=>{
+  let complete;
+  const p=panel({superPNG:true,encode(callback){complete=callback;}});
+  p.api.quickExport([{path:'/preset'}]);
+  p.nodes.superPNG.checked=false; // Programmatic change simulates stale UI state.
+  p.reply();p.flush();assert.equal(p.encodings.length,1);
+  assert.equal(p.saved.length,0);assert.equal(p.nodes.quick.disabled,true);assert.equal(p.nodes.superPNG.disabled,true);
+  complete(null,'SuperPNG bytes');p.flush();assert.equal(p.saved.length,1);assert.equal(p.nodes.superPNG.disabled,false);
+});
+
+test('SuperPNG failure does not publish ordinary PNG as a successful export',()=>{
+  const p=panel({superPNG:true,encode(callback){callback(Error('SuperPNG missing'));}});
+  p.api.quickExport([{path:'/preset'}]);p.reply();p.flush();
+  assert.equal(p.saved.length,0);assert.match(p.nodes.result.textContent,/SuperPNG missing/);
+  assert.equal(p.nodes.quick.disabled,false);
+});
+
+test('source selection changes during SuperPNG conversion prevent final publication',()=>{
+  let complete;
+  const p=panel({superPNG:true,encode(callback){complete=callback;}});
+  p.api.quickExport([{path:'/preset'}]);p.reply();p.flush();p.select('B');
+  complete(null,'SuperPNG bytes');p.flush();assert.equal(p.saved.length,0);
+  assert.match(p.nodes.result.textContent,/选择或内容已改变/);
+});
+
+test('canvas conversion failure produces no final file',()=>{
+  const p=panel({superPNG:true,encode(callback){callback(Error('canvas SuperPNG failed'));}});
+  p.api.quickCanvas();p.flush();assert.equal(p.saved.length,0);
+  assert.match(p.nodes.status.textContent,/canvas SuperPNG failed/);
+});
+
+test('ordinary canvas export skips SuperPNG',()=>{
+  const p=panel();p.api.quickCanvas();p.flush();
+  assert.equal(p.encodings.length,0);assert.equal(p.saved.length,1);
 });

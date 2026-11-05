@@ -1,8 +1,8 @@
 (function () {
   'use strict';
-  var ids=['kind','name','original','status','width','height','align','anchor','padding','export','refresh','result','diagnose','debug','folder','directory','quick','addPreset','presets','presetCount','report','reportIcon','reportTitle','reportSummary','reportSize','reportList','reportDetails','restoreSize','directoryName','presetPrev','presetNext','presetPage','prefix','clearPrefix','fileName','exportName','resetName','canvas','canvasFolder','canvasDirectory','canvasDirectoryName'],el={};
+  var ids=['kind','name','original','status','width','height','align','anchor','padding','export','refresh','result','diagnose','debug','folder','directory','quick','addPreset','presets','presetCount','report','reportIcon','reportTitle','reportSummary','reportSize','reportList','reportDetails','restoreSize','directoryName','presetPrev','presetNext','presetPage','prefix','clearPrefix','fileName','exportName','resetName','canvas','canvasFolder','canvasDirectory','canvasDirectoryName','superPNG'],el={};
   ids.forEach(function(id){el[id]=document.getElementById(id);});
-  var rules=window.Align4Rules,bridge=window.__adobe_cep__,fs,path,os,png,pngWait,outputFiles,canvasExporter,outputDirectory='',canvasDirectory='',choosingFolder=false,presets=[],presetViews=[],presetPage=0,presetPageSize=(window.innerHeight&&window.innerHeight>=580)?3:2,quickRequest=null,canvasRequest=null,lastCanvas=null,lastExport=null,Buffer;
+  var rules=window.Align4Rules,bridge=window.__adobe_cep__,fs,path,os,png,pngWait,outputFiles,canvasExporter,superPNG,outputDirectory='',canvasDirectory='',choosingFolder=false,presets=[],presetViews=[],presetPage=0,presetPageSize=(window.innerHeight&&window.innerHeight>=580)?3:2,quickRequest=null,canvasRequest=null,lastCanvas=null,lastExport=null,Buffer;
   var info=null,cache=null,dirty=false,editSequence=0,sequence=0,rendering=false,saving=false,checking=false,pending=false,pendingForce=false;
   var namingToken=null,nameSource='',nameEdited=false,nameDraft=null,nameValue='';
   var timer=null,eventMap={},registered=[],listeners=[],owned=[],retained=[],activeJob=null,lastNative=null,lastFailure=null,closing=false,extensionId='com.align4.export.panel',appId='PHXS',windowSizeRequest=null;
@@ -53,7 +53,7 @@
   }
   function controls(){
     var blocked=rendering||saving||checking||pending||choosingFolder||!!quickRequest||!!canvasRequest;
-    el.refresh.disabled=blocked;el.diagnose.disabled=false;el.folder.disabled=blocked;
+    el.superPNG.disabled=blocked;el.refresh.disabled=blocked;el.diagnose.disabled=false;el.folder.disabled=blocked;
     var nameMissing=!!namingToken&&!normalizedName();
     var quickBlocked=saving||choosingFolder||!!quickRequest||!!canvasRequest||nameMissing;
     el.quick.disabled=!outputDirectory||quickBlocked;el.canvas.disabled=!canvasDirectory||!canvasExporter||saving||choosingFolder||!!quickRequest||!!canvasRequest;setText(el.canvas,canvasRequest?'整图导出中…':'导出整个画布 ↗');el.addPreset.disabled=blocked;
@@ -181,7 +181,12 @@
     var seen={},out=[];
     list.forEach(function(d){var key=String(d.path||'').replace(/[\\/]+$/,'').toLowerCase();if(key&&!Object.prototype.hasOwnProperty.call(seen,key)){seen[key]=true;out.push({path:d.path,name:d.name||path.basename(d.path)||d.path});}});return out;
   }
-  function writeTargets(list,w,h,token,prefix,name,done){
+  function encodePNG(data,enabled,callback){
+    if(!enabled){callback(null,data);return;}
+    message('正在使用 SuperPNG 保存…','working');
+    superPNG.encode({fs:fs,path:path,os:os,png:png,host:host},data,true,callback);
+  }
+  function writeTargets(list,w,h,token,prefix,name,done,useSuperPNG){
     saving=true;controls();message('正在保存到 '+list.length+' 个目录…','working');
     host('Align4.describeSelection()',function(current){
       var successes=[],errors=[];
@@ -189,26 +194,41 @@
         if(!current.ok||current.token!==token||dirty||(info.revision!=null&&current.revision!=null&&info.revision!==current.revision)){throw new Error('选择或内容已改变，请重新检测后导出。');}
         if(!name){throw new Error('请填写导出名称。');}
         var data=png.pad(cache.data,w,h,el.anchor.value),exportName=outputFiles.nameFor(prefix,name);
+      }catch(e){finish(e);return;}
+      encodePNG(data,useSuperPNG,function(error,encoded){
+        if(error){finish(error);return;}
+        // SuperPNG temporarily activates its own PNG document. Check the source
+        // again only after the host has restored the original document.
+        if(useSuperPNG){host('Align4.describeSelection()',function(latest){
+          if(!latest.ok||latest.token!==token||(current.revision!=null&&latest.revision!=null&&current.revision!==latest.revision)){finish(new Error('SuperPNG 保存期间选择或内容已改变，未写入目标目录。'));return;}
+          publish(encoded);
+        });}else{publish(encoded);}
+      });
+      function publish(encoded){
         list.forEach(function(directory){
-          try{var output=outputFiles.save(fs,path,png,directory.path,exportName,data);output.directory=directory.path;output.label=directory.name;successes.push(output);}
+          try{var output=outputFiles.save(fs,path,png,directory.path,exportName,encoded);output.directory=directory.path;output.label=directory.name;successes.push(output);}
           catch(e){errors.push({directory:directory.path,label:directory.name,message:String(e.message||e)});}
         });
-      }catch(e){errors.push({directory:'',message:String(e.message||e)});}
-      lastExport={name:info?info.name:'',prefix:prefix,fileName:successes.length?path.basename(successes[0].path):'',width:w,height:h,successes:successes,errors:errors};saving=false;if(done){done();}controls();
-      el.result.textContent=successes.map(function(r){return '已导出 '+r.width+' × '+r.height+' px：'+r.path;}).concat(errors.map(function(e){return '失败：'+(e.directory?e.directory+'：':'')+e.message;})).join('\n');
-      showReport(lastExport);
-      message(errors.length?'已保存 '+successes.length+' 个目录，失败 '+errors.length+' 项。':'已导出到 '+successes.length+' 个目录。',errors.length?'error':'ok');
-      if(pending){schedule(false);}
+        finish();
+      }
+      function finish(error){
+        if(error){errors.push({directory:'',message:String(error.message||error)});}
+        lastExport={name:info?info.name:'',encoder:useSuperPNG?'SuperPNG':'PNG',prefix:prefix,fileName:successes.length?path.basename(successes[0].path):'',width:w,height:h,successes:successes,errors:errors};saving=false;if(done){done();}controls();
+        el.result.textContent=successes.map(function(r){return '已导出 '+r.width+' × '+r.height+' px：'+r.path;}).concat(errors.map(function(e){return '失败：'+(e.directory?e.directory+'：':'')+e.message;})).join('\n');
+        showReport(lastExport);
+        message(errors.length?'已保存 '+successes.length+' 个目录，失败 '+errors.length+' 项。':'已导出到 '+successes.length+' 个目录。',errors.length?'error':'ok');
+        if(pending){schedule(false);}
+      }
     });
   }
   function save(){
     if(!info||!cache||!outputDirectory||rendering||checking||saving||pending||choosingFolder||quickRequest||canvasRequest){return;}
-    var token=info.token,w=Number(el.width.value),h=Number(el.height.value),directory=outputDirectory,prefix=String(el.prefix.value||''),name=normalizedName();
+    var token=info.token,w=Number(el.width.value),h=Number(el.height.value),directory=outputDirectory,prefix=String(el.prefix.value||''),name=normalizedName(),useSuperPNG=!!el.superPNG.checked;
     if(!name){fail('请填写导出名称。');return;}
     detect(true,function(ok){
       if(!ok){return;}
       if(!info||info.token!==token||!rules.valid(w,h,info.width,info.height)){controls();fail('对象或真实尺寸已改变，请检查尺寸后重新导出。');return;}
-      writeTargets([{path:directory}],w,h,token,prefix,name);
+      writeTargets([{path:directory}],w,h,token,prefix,name,null,useSuperPNG);
     });
   }
   function abortQuick(text){quickRequest=null;controls();fail(text);if(pending){schedule(false);}}
@@ -222,13 +242,13 @@
       if(!rules.valid(w,h,info.width,info.height)){abortQuick('自定义尺寸超出范围，请检查宽高后重试。');return;}
       el.width.value=w;el.height.value=h;
       var name=request.name===null?outputFiles.normalizeName(info.name):request.name;
-      writeTargets(request.directories,w,h,request.token,request.prefix,name,function(){quickRequest=null;});
+      writeTargets(request.directories,w,h,request.token,request.prefix,name,function(){quickRequest=null;},request.superPNG);
     });
   }
   function quickExport(directories){
     if(quickRequest||canvasRequest||saving||choosingFolder||closing){return;}
     var list=uniqueDirectories(directories);if(!list.length){fail('请先选择或添加导出目录。');return;}
-    var request={directories:list,prefix:String(el.prefix.value||''),name:normalizedName(),nameOwner:namingToken,owner:info?info.token:null,width:Number(el.width.value),height:Number(el.height.value),ready:false,running:false};
+    var request={directories:list,superPNG:!!el.superPNG.checked,prefix:String(el.prefix.value||''),name:normalizedName(),nameOwner:namingToken,owner:info?info.token:null,width:Number(el.width.value),height:Number(el.height.value),ready:false,running:false};
     var draft=nameDraft;
     quickRequest=request;controls();
     whenNameBound(draft,function(){
@@ -253,14 +273,14 @@
     if(!request||!request.ready||request.running||rendering||checking||saving||choosingFolder||quickRequest||closing){return;}
     if(timer!==null){window.clearTimeout(timer);timer=null;}pending=false;pendingForce=false;request.running=true;
     message('正在导出整个画布，不受选中图层影响…','working');controls();
-    request.job=canvasExporter.run({fs:fs,path:path,os:os,png:png,pngWait:pngWait,outputFiles:outputFiles,rules:rules,host:host,now:Date.now,
+    request.job=canvasExporter.run({fs:fs,path:path,os:os,png:png,pngWait:pngWait,outputFiles:outputFiles,encodePNG:encodePNG,rules:rules,host:host,now:Date.now,
       setTimeout:function(fn,delay){return window.setTimeout(fn,delay);},clearTimeout:function(id){window.clearTimeout(id);},getEditSequence:function(){return editSequence;}},request,endCanvas);
     lastCanvas=request.job.state;
   }
   function quickCanvas(){
     if(canvasRequest||quickRequest||saving||choosingFolder||closing){return;}
     if(!canvasDirectory){fail('请先在左下方添加整图导出目录。');return;}
-    var request={directories:[{path:canvasDirectory}],prefix:String(el.prefix.value||''),name:normalizedName()||null,anchor:el.anchor.value,ready:false,running:false};
+    var request={directories:[{path:canvasDirectory}],superPNG:!!el.superPNG.checked,prefix:String(el.prefix.value||''),name:normalizedName()||null,anchor:el.anchor.value,ready:false,running:false};
     canvasRequest=request;controls();
     host('Align4.describeDocument()',function(meta){
       if(!meta.ok){endCanvas(new Error(meta.message));return;}
@@ -324,6 +344,7 @@
   });
   el.refresh.addEventListener('click',function(){if(timer!==null){window.clearTimeout(timer);timer=null;}pending=false;pendingForce=false;detect(true);});
   el.width.addEventListener('input',controls);el.width.addEventListener('change',controls);el.height.addEventListener('input',controls);el.height.addEventListener('change',controls);el.anchor.addEventListener('change',controls);
+  el.superPNG.addEventListener('change',function(){try{window.localStorage.setItem('align4-superpng',el.superPNG.checked?'1':'0');}catch(e){}controls();});
   function persistPrefix(){try{window.localStorage.setItem('align4-filename-prefix',el.prefix.value);}catch(e){}controls();}
   // Older CEP/IME combinations may deliver compositionend or keyup without input.
   // Each route reads the live field; no host render or manual refresh is required.
@@ -352,7 +373,7 @@
   el.align.addEventListener('click',function(){if(info){el.width.value=rules.ceil4(Math.max(info.width,Number(el.width.value)||0));el.height.value=rules.ceil4(Math.max(info.height,Number(el.height.value)||0));controls();}});
   el.export.addEventListener('click',save);el.canvas.addEventListener('click',quickCanvas);
   el.diagnose.addEventListener('click',function(){
-    function show(r){el.debug.hidden=false;el.debug.value=JSON.stringify({host:r,measured:info?{name:info.name,width:info.width,height:info.height,depth:cache.depth,color:cache.color}:null,dirty:dirty,nativeJob:lastNative,state:{rendering:rendering,checking:checking,pending:pending,notifications:sequence},rulesLoaded:!!(rules&&rules.valid&&rules.ceil4),target:{width:el.width.value,height:el.height.value},lastFailure:lastFailure,outputDirectory:outputDirectory,canvasDirectory:canvasDirectory,filenamePrefix:el.prefix.value,exportName:el.exportName.value,namingToken:namingToken,fileNamePreview:el.fileName.textContent,presets:presets,quickQueued:!!quickRequest,canvasQueued:!!canvasRequest,canvasJob:lastCanvas,lastExport:lastExport,windowSizeRequest:windowSizeRequest},null,2);el.debug.focus();el.debug.select();}
+    function show(r){el.debug.hidden=false;el.debug.value=JSON.stringify({host:r,measured:info?{name:info.name,width:info.width,height:info.height,depth:cache.depth,color:cache.color}:null,dirty:dirty,nativeJob:lastNative,state:{rendering:rendering,checking:checking,pending:pending,notifications:sequence},rulesLoaded:!!(rules&&rules.valid&&rules.ceil4),target:{width:el.width.value,height:el.height.value},lastFailure:lastFailure,outputDirectory:outputDirectory,canvasDirectory:canvasDirectory,filenamePrefix:el.prefix.value,exportName:el.exportName.value,namingToken:namingToken,fileNamePreview:el.fileName.textContent,presets:presets,quickQueued:!!quickRequest,canvasQueued:!!canvasRequest,canvasJob:lastCanvas,lastExport:lastExport,superPNG:!!el.superPNG.checked,windowSizeRequest:windowSizeRequest},null,2);el.debug.focus();el.debug.select();}
     show({message:'正在取得 Photoshop 信息；上方任务状态已可复制。'});host('Align4.diagnose()',show);
   });
   function dispatch(type,id){bridge.dispatchEvent(JSON.stringify({type:type,scope:'APPLICATION',extensionId:extensionId,appId:appId,data:String(id)}));}
@@ -376,6 +397,6 @@
     fs=rq('fs');path=rq('path');os=rq('os');Buffer=rq('buffer').Buffer;
     var base=decodeURI(bridge.getSystemPath('extension')).replace(/^file:\/\//,'');if(/^\/[A-Za-z]:/.test(base)){base=base.slice(1);}
     rules=window.Align4Rules||rq(path.join(base,'js','rules.js'));if(!rules||typeof rules.valid!=='function'||typeof rules.ceil4!=='function'){throw new Error('尺寸计算模块未正确加载。');}window.Align4Rules=rules;
-    png=rq(path.join(base,'js','png-padding.js'));pngWait=rq(path.join(base,'js','native-png-wait.js'));outputFiles=rq(path.join(base,'js','output-files.js'));canvasExporter=rq(path.join(base,'js','canvas-export.js'));try{outputDirectory=window.localStorage.getItem('align4-export-directory')||'';canvasDirectory=window.localStorage.getItem('align4-canvas-directory')||'';el.prefix.value=(window.localStorage.getItem('align4-filename-prefix')||'').slice(0,32);}catch(e){}el.directory.textContent=outputDirectory||'尚未选择目录';el.directory.title=outputDirectory;try{var savedPresets=JSON.parse(window.localStorage.getItem('align4-directory-presets')||'[]');if(Array.isArray(savedPresets)){savedPresets.forEach(function(p){if(p&&typeof p.path==='string'&&p.path){presets.push({path:p.path,name:typeof p.name==='string'?p.name:path.basename(p.path)});}});}}catch(e){}renderPresets();restoreSize(false);controls();register();
+    png=rq(path.join(base,'js','png-padding.js'));pngWait=rq(path.join(base,'js','native-png-wait.js'));outputFiles=rq(path.join(base,'js','output-files.js'));canvasExporter=rq(path.join(base,'js','canvas-export.js'));superPNG=rq(path.join(base,'js','superpng.js'));try{el.superPNG.checked=window.localStorage.getItem('align4-superpng')==='1';outputDirectory=window.localStorage.getItem('align4-export-directory')||'';canvasDirectory=window.localStorage.getItem('align4-canvas-directory')||'';el.prefix.value=(window.localStorage.getItem('align4-filename-prefix')||'').slice(0,32);}catch(e){}el.directory.textContent=outputDirectory||'尚未选择目录';el.directory.title=outputDirectory;try{var savedPresets=JSON.parse(window.localStorage.getItem('align4-directory-presets')||'[]');if(Array.isArray(savedPresets)){savedPresets.forEach(function(p){if(p&&typeof p.path==='string'&&p.path){presets.push({path:p.path,name:typeof p.name==='string'?p.name:path.basename(p.path)});}});}}catch(e){}renderPresets();restoreSize(false);controls();register();
   }catch(e){controls();fail('文件处理模块未加载，请重启 PS 并确认新版安装成功。'+String(e.message||e));}
 }());

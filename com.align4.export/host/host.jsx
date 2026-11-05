@@ -68,6 +68,44 @@ var Align4 = (function () {
     }
     function startNative(expected, directory) { return startNativeFor(expected, directory, false); }
     function startNativeCanvas(expected, directory) { return startNativeFor(expected, directory, true); }
+    function convertSuperPNG(inputPath, outputPath) {
+        var original = app.documents.length ? app.activeDocument : null;
+        var oldDialogs = app.displayDialogs, doc = null;
+        try {
+            var input = new File(inputPath), output = new File(outputPath);
+            if (!input.exists || output.exists) { throw new Error('SuperPNG 临时输入不存在或输出已存在。'); }
+            app.displayDialogs = DialogModes.NO;
+            // Force the Adobe PNG reader so SuperPNG import preferences cannot
+            // turn transparency into a separate alpha channel.
+            doc = app.open(input, OpenDocumentType.PNG);
+            app.activeDocument = doc;
+            var c = charIDToTypeID, options = new ActionDescriptor();
+            options.putInteger(c('pngC'), 9);
+            options.putInteger(c('pngF'), 248);
+            options.putInteger(c('pngS'), 0);
+            options.putBoolean(c('pngQ'), false);
+            options.putEnumerated(c('pngA'), c('alfT'), c('alfT'));
+            options.putBoolean(c('pngX'), true);
+            options.putBoolean(c('pngI'), false);
+            options.putBoolean(c('pngM'), true);
+            var save = new ActionDescriptor();
+            save.putObject(c('As  '), sid('fnord SuperPNG'), options);
+            save.putPath(c('In  '), output);
+            save.putBoolean(c('Cpy '), true);
+            save.putBoolean(c('LwCs'), true);
+            executeAction(c('save'), save, DialogModes.NO);
+            if (!output.exists) { throw new Error('SuperPNG 未生成输出文件。'); }
+            return json({ok:true});
+        } catch (e) {
+            return json({ok:false, message:'请确认已安装并能手动另存 SuperPNG。'+String(e.message || e)});
+        } finally {
+            try { if (doc) { doc.close(SaveOptions.DONOTSAVECHANGES); } }
+            finally {
+                app.displayDialogs = oldDialogs;
+                if (original) { try { app.activeDocument = original; } catch (ignore) {} }
+            }
+        }
+    }
     function chooseFolder(previous) {
         try {
             var initial = previous ? new Folder(previous) : null;
@@ -90,7 +128,7 @@ var Align4 = (function () {
         return json({ok:true, events:result});
     }
     function diagnose() {
-        try { return json({ok:true, data:{plugin:'1.10.2 native PNG', photoshop:String(app.version), selection:meta(), sizeSource:'实际原生 PNG 的 IHDR，不使用图层 bounds'}}); } catch (e) { return error(e); }
+        try { return json({ok:true, data:{plugin:'1.11.0 native PNG', photoshop:String(app.version), selection:meta(), sizeSource:'实际原生 PNG 的 IHDR，不使用图层 bounds'}}); } catch (e) { return error(e); }
     }
-    return {selectionToken:selectionToken, describeSelection:describeSelection, describeDocument:describeDocument, startNative:startNative, startNativeCanvas:startNativeCanvas, chooseFolder:chooseFolder, openFolder:openFolder, eventIDs:eventIDs, diagnose:diagnose};
+    return {selectionToken:selectionToken, describeSelection:describeSelection, describeDocument:describeDocument, startNative:startNative, startNativeCanvas:startNativeCanvas, convertSuperPNG:convertSuperPNG, chooseFolder:chooseFolder, openFolder:openFolder, eventIDs:eventIDs, diagnose:diagnose};
 }());
