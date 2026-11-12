@@ -128,7 +128,25 @@ var Align4 = (function () {
         return json({ok:true, events:result});
     }
     function diagnose() {
-        try { return json({ok:true, data:{plugin:'1.11.1 native PNG', photoshop:String(app.version), selection:meta(), sizeSource:'实际原生 PNG 的 IHDR，不使用图层 bounds'}}); } catch (e) { return error(e); }
+        try { return json({ok:true, data:{photoshop:String(app.version), selection:meta(), sizeSource:'实际原生 PNG 的 IHDR，不使用图层 bounds'}}); } catch (e) { return error(e); }
     }
-    return {selectionToken:selectionToken, describeSelection:describeSelection, describeDocument:describeDocument, startNative:startNative, startNativeCanvas:startNativeCanvas, convertSuperPNG:convertSuperPNG, chooseFolder:chooseFolder, openFolder:openFolder, eventIDs:eventIDs, diagnose:diagnose};
+    // Read-only facts for the diagnostic bundle. Every field is optional.
+    function environment() {
+        var out = {ok:true, photoshop:String(app.version), os:String($.os), openDocuments:app.documents.length};
+        try { out.scratchFreeMB = Math.round(app.freeMemory / 1048576); } catch (e) {}
+        if (!app.documents.length) { return json(out); }
+        var doc = app.activeDocument, d = {name:String(doc.name)};
+        try { d.width = Math.round(doc.width.as('px')); d.height = Math.round(doc.height.as('px')); } catch (e) {}
+        try { d.mode = String(doc.mode); d.bits = String(doc.bitsPerChannel); } catch (e) {}
+        try { var f = new File(doc.fullName); d.fileMB = Math.round(f.length / 1048576); } catch (e) { d.fileMB = null; d.unsaved = true; }
+        try { d.saved = doc.saved; } catch (e) {}
+        try {
+            var r = new ActionReference(); r.putProperty(sid('property'), sid('numberOfLayers')); r.putEnumerated(sid('document'), sid('ordinal'), sid('targetEnum'));
+            d.layers = executeActionGet(r).getInteger(sid('numberOfLayers'));
+        } catch (e) {}
+        try { d.selection = meta(); } catch (e) { d.selection = String(e.message || e); }
+        out.document = d;
+        return json(out);
+    }
+    return {selectionToken:selectionToken, describeSelection:describeSelection, describeDocument:describeDocument, startNative:startNative, startNativeCanvas:startNativeCanvas, convertSuperPNG:convertSuperPNG, chooseFolder:chooseFolder, openFolder:openFolder, eventIDs:eventIDs, diagnose:diagnose, environment:function () { try { return environment(); } catch (e) { return error(e); } }};
 }());

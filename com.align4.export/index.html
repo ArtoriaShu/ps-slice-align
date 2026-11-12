@@ -13,7 +13,7 @@
   <section class="canvas-destination"><div class="canvas-destination-heading"><h2>整图导出</h2><button id="canvasFolder" class="text-button">＋ 添加</button></div><div class="folder-copy"><span class="folder-icon" aria-hidden="true"></span><div><strong id="canvasDirectoryName">先添加目录</strong><p id="canvasDirectory">与切图目录独立</p></div></div></section>
   <button id="canvas" class="canvas-sidebar-export" title="导出整个画布到上方目录" disabled>导出整个画布 ↗</button>
  </div>
- <footer><span>v1.11.1</span><button id="restoreSize" class="text-button" title="恢复 760 × 620 的窗口内容尺寸">默认大小</button><button id="diagnose" class="text-button">诊断</button></footer>
+ <footer><span id="version">v1.12.0</span><button id="restoreSize" class="text-button" title="恢复 760 × 620 的窗口内容尺寸">默认大小</button><button id="diagnose" class="text-button" title="查看运行日志、复制诊断信息">日志</button></footer>
 </aside>
 <main class="workspace">
  <div class="workspace-content">
@@ -28,4 +28,10 @@
   <div class="feedback-slot"><section id="report" class="report" hidden aria-live="polite"><div class="report-header"><span id="reportIcon" class="report-icon">✓</span><div class="report-heading"><h2 id="reportTitle">已导出</h2><p id="reportSummary"></p></div><span id="reportSize" class="report-size"></span></div><button id="reportDetails" class="report-details-button" disabled>详情</button><div id="reportList" class="report-list" hidden></div></section><span class="feedback-placeholder">导出结果将在这里显示</span></div>
   <p id="result" hidden></p><textarea id="debug" hidden readonly aria-label="诊断信息，可按 Ctrl+C 复制"></textarea>
  </div>
-</main></div><script src="js/rules.js"></script><script src="js/panel.js"></script></body></html>
+</main>
+<section id="logPanel" class="log-panel" hidden aria-label="运行日志">
+ <header class="log-header"><h2>运行日志</h2><label class="log-verbose"><input id="logVerbose" type="checkbox">显示详细</label><button id="logCopy" class="log-action primary-action" title="复制环境、日志与 Generator 日志，可直接粘贴发送">复制诊断信息</button><button id="logFolder" class="log-action" title="打开日志文件所在目录">打开日志目录</button><button id="logClose" class="log-close" aria-label="关闭日志">×</button></header>
+ <div id="logList" class="log-list" role="log" aria-live="polite"></div>
+ <p id="logNote" class="log-note"></p>
+</section>
+</div><script src="js/rules.js"></script><script src="js/panel.js"></script></body></html>

@@ -70,3 +70,19 @@ button:focus,summary:focus,input:focus,select:focus{outline-color:#c5d2e8}
 .superpng-option{display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap}
 .superpng-option input{width:13px;height:13px;margin:0;flex-shrink:0}
 @media(max-height:580px){.export-options{height:21px}}
+
+/* ---- Run log ---- */
+.log-panel{position:fixed;top:0;right:0;bottom:0;left:0;z-index:60;display:flex;flex-direction:column;background:#151b26;color:#d9e0ec;padding:12px 14px 10px}
+.log-header{display:flex;align-items:center;gap:8px;flex-shrink:0;margin-bottom:8px}
+.log-header h2{font-size:13px;margin-right:auto;color:#f1f4f9}
+.log-verbose{display:flex;align-items:center;gap:4px;font-size:10px;color:#9aa6ba}
+.log-action{height:26px;padding:0 11px;border-radius:13px;background:#283247;color:#d9e0ec;font-size:10px;white-space:nowrap}
+.log-panel button:hover:not(:disabled){background:#35415a}
+.log-action.primary-action{background:#d9c7a0;color:#1c2230;font-weight:600}
+.log-panel .log-action.primary-action:hover:not(:disabled){background:#e8d8b4}
+.log-close{width:26px;height:26px;border-radius:50%;background:transparent;color:#c2cbdb;font-size:16px}
+.log-list{flex:1;min-height:0;overflow:auto;padding:8px 10px;border-radius:8px;background:#0e131c;font:10.5px/1.55 Consolas,"Microsoft YaHei",monospace;user-select:text}
+.log-row{white-space:pre-wrap;word-break:break-all}
+.log-debug{color:#7f8aa0}.log-info{color:#d9e0ec}.log-warn{color:#f0cf8a}.log-error{color:#ff9fa8}
+.log-empty{color:#7f8aa0;font-size:11px;padding:8px 0}
+.log-note{flex-shrink:0;margin-top:6px;font-size:9px;color:#7f8aa0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

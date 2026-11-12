@@ -37,7 +37,7 @@ function panel(options = {}) {
   let source = fs.readFileSync(path.join(__dirname,'../com.align4.export/js/panel.js'),'utf8');
   source = source.slice(0,source.lastIndexOf('  try{\n    var rq=')) + `
     window.testPanel={syncNaming:syncNaming,detect:detect,quickExport:quickExport,save:save,quickCanvas:quickCanvas,startPolling:startPolling,onEvent:onEvent,cleanup:cleanup,
-      configure:function(o){fs=o.fs;path=o.path;os=o.os;png=o.png;pngWait=o.pngWait;
+      configure:function(o){fs=o.fs;path=o.path;os=o.os;png=o.png;nativeExport=o.nativeExport;
         outputFiles=o.outputFiles;superPNG=o.superPNG;canvasExporter=o.canvasExporter;canvasDirectory='/canvas';outputDirectory='/exports';eventMap={'1':false,'2':true};
         info={token:'A',name:'PS-A',width:4,height:4,revision:'1'};cache={data:'png'};
         el.width.value=4;el.height.value=4;syncNaming(info);},
@@ -50,7 +50,7 @@ function panel(options = {}) {
     canvasExporter:require('../com.align4.export/js/canvas-export'),
     fs:{mkdtempSync:()=>'/tmp/mock-'+(++dir),existsSync:()=>false},
     png:{pad:()=>Buffer.from('png')},
-    pngWait:{wait(options,directory,callback){callback(null,{data:'png',measured:{width:4,height:4,depth:8,color:6}});}},
+    nativeExport:{run(o,spec,callback){o.host(spec.script('/tmp/mock-native'),r=>callback(r.ok?null:Error(r.message),r.ok?{data:'png',measured:{width:4,height:4,depth:8,color:6},attempt:1}:null));return {state:{attempts:1},cancel(){}};}},
     outputFiles:{...outputFiles,save(fs,path,png,directory,name,data){saved.push(name);if(options.superPNG)assert.equal(data,'SuperPNG bytes');return {path:directory+'/'+name+'.png',width:4,height:4};}}
   });
   nodes.superPNG.checked=!!options.superPNG;
