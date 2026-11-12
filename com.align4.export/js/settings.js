@@ -40,7 +40,7 @@ exports.load = function (storage) {
     s.prefix = (get('align4-filename-prefix') || '').slice(0, 32);
     s.superPNG = get('align4-superpng') === '1';
   }
-  if (s.anchor !== 'topLeft') { s.anchor = 'center'; }
+  s.anchor = 'center'; // padding is always centred
   s.sizeLocked = !!s.sizeLocked; s.translate = !!s.translate; s.superPNG = !!s.superPNG; s.canvasSuperPNG = !!s.canvasSuperPNG; s.canvasDirectory = typeof s.canvasDirectory === 'string' ? s.canvasDirectory : ''; s.prefix = String(s.prefix || '').slice(0, 32);
   return s;
 };

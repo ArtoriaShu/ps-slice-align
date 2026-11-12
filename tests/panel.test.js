@@ -228,10 +228,9 @@ test('translation: a typed Chinese name becomes an English file name; typed Engl
   appdata(t);
   const p = boot(t, {settings: {translate: true}});
   await until(() => p.exportButton() && !p.exportButton().disabled);
-  assert.equal(p.nodes.englishRow.hidden, false);
   p.nodes.exportName.value = '聊天 装饰 气泡'; p.nodes.exportName.fire('input');
   await wait(20);
-  assert.equal(text(p.nodes.englishAuto), 'chat_deco_bubble.png');
+  assert.equal(p.nodes.englishName.value, 'chat_deco_bubble'); assert.equal(p.nodes.englishName.readOnly, false);
   assert.equal(p.nodes.fileName.textContent, 'chat_deco_bubble.png');
   p.exportButton().fire('click');
   await until(() => fs.readdirSync(p.out).length === 1);
@@ -240,15 +239,19 @@ test('translation: a typed Chinese name becomes an English file name; typed Engl
   assert.equal(p.nodes.fileName.textContent, 'btnConfirm.png');
 });
 
-test('translation: fixing the English in its own row is remembered for next time', async t => {
+test('translation: typing over the English is remembered for next time', async t => {
   const dir = appdata(t);
   const p = boot(t, {settings: {translate: true}});
   p.select({token: '1|8|1', name: '头像闪光', kind: '图层', revision: '3'});
-  await until(() => text(p.nodes.englishAuto) === 'avatar_flash.png');
-  assert.match(text(p.nodes.translateNote), /词典译法/);
-  p.nodes.englishEdit.fire('click');
-  assert.equal(p.nodes.englishName.hidden, false); assert.equal(p.nodes.englishName.value, 'avatar_flash');
+  await until(() => p.nodes.englishName.value === 'avatar_flash');
+  assert.match(text(p.nodes.translateNote), /闪光 → flash/, 'the exact word to check is named');
+  const chip = p.nodes.translateNote.children.find(c => /flash/.test(c.textContent));
+  let focused = false, range = null;
+  p.nodes.englishName.focus = () => { focused = true; }; p.nodes.englishName.setSelectionRange = (a, b) => { range = [a, b]; };
+  chip.fire('mousedown', {preventDefault() {}});
+  assert.ok(focused); assert.deepEqual(range, [7, 12], 'clicking the chip selects "flash"');
   p.nodes.englishName.value = 'avatar_shine'; p.nodes.englishName.fire('input');
+  assert.equal(p.nodes.englishReset.hidden, false);
   assert.equal(p.nodes.exportName.value, '头像闪光', 'the Chinese name is untouched');
   assert.equal(p.nodes.fileName.textContent, 'avatar_shine.png');
   p.exportButton().fire('click');
@@ -258,6 +261,15 @@ test('translation: fixing the English in its own row is remembered for next time
   await until(() => fs.existsSync(glossary));
   assert.match(fs.readFileSync(glossary, 'utf8'), /闪光,shine/);
   p.select({token: '1|9|1', name: '按钮闪光', kind: '图层', revision: '3'});
-  await until(() => text(p.nodes.englishAuto) === 'btn_shine.png');
-  assert.equal(p.nodes.englishName.hidden, true, 'a new name starts from the automatic English again');
+  await until(() => p.nodes.englishName.value === 'btn_shine');
+  assert.equal(p.nodes.englishReset.hidden, true, 'a new name starts from the automatic English again');
+});
+
+test('without translation the file field mirrors the name and is read-only', async t => {
+  const p = boot(t);
+  await until(() => p.exportButton() && !p.exportButton().disabled);
+  p.nodes.prefix.value = 'ui_'; p.nodes.prefix.fire('input');
+  assert.equal(p.nodes.englishName.value, '按钮'); assert.equal(p.nodes.englishName.readOnly, true);
+  assert.equal(p.nodes.filePrefix.textContent, 'ui_'); assert.equal(p.nodes.fileName.textContent, 'ui_按钮.png');
+  assert.equal(p.nodes.translateNote.hidden, true);
 });

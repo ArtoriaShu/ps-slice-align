@@ -7,7 +7,7 @@
     superpng: 'SuperPNG 编码', write: '写入文件', done: '完成'};
 
   var ids = ['openLog', 'objectKind', 'refresh', 'objectName', 'sizeSource', 'sizeTarget', 'objectHint',
-    'resetName', 'translate', 'openGlossary', 'translateNote', 'englishRow', 'englishAuto', 'englishName', 'englishEdit', 'englishReset', 'anchorHint', 'lockSize', 'prefix', 'clearPrefix', 'exportName', 'fileName', 'sizeGroup', 'minWidth', 'minHeight', 'anchorCenter', 'anchorTopLeft',
+    'resetName', 'translate', 'openGlossary', 'translateNote', 'englishRow', 'filePrefix', 'englishName', 'englishReset', 'fileMeasure', 'lockSize', 'prefix', 'clearPrefix', 'exportName', 'fileName', 'sizeGroup', 'minWidth', 'minHeight',
     'superPNG', 'directoryCount', 'addDirectory', 'directoryList', 'statusbar', 'statusTitle', 'statusDetail', 'statusOpen', 'statusLog',
     'cancelJob', 'canvasIcon', 'canvasDirName', 'canvasDirPath', 'canvasLast', 'canvasFolder', 'canvasSuperPNG', 'canvasExport', 'logPanel', 'logVerbose', 'logCopy', 'logFolder', 'logClose', 'logList', 'logNote', 'version', 'restoreSize', 'debug'];
   var el = {};
@@ -155,6 +155,20 @@
     return changed;
   }
 
+  // Clicking a "需核对" chip selects that word in the file field, ready to be typed over.
+  function selectWord(word) {
+    var v = el.englishName.value, at = v.indexOf(word);
+    el.englishName.focus();
+    if (at >= 0) { try { el.englishName.setSelectionRange(at, at + word.length); } catch (e) {} }
+  }
+  // The name input is as wide as its text, so ".png" follows it directly (it shrinks and scrolls when long).
+  function fitFileInput() {
+    var input = el.englishName, measure = el.fileMeasure;
+    if (!measure || measure.offsetWidth == null) { return; }
+    setText(measure, input.value || input.placeholder || ' ');
+    input.style.width = (measure.offsetWidth + 4) + 'px';
+  }
+
   // ---------- Rendering ----------
   function recentDirectory() {
     var best = null;
@@ -213,48 +227,34 @@
     el.exportName.parentNode.className = 'field name-field' + (nm.edited ? ' custom' : '');
     el.resetName.hidden = !nm.edited; el.resetName.disabled = !!job;
     var zh = M.naming.normalize(el.exportName.value), note = null;
-    // English row (translation on): automatic English with source marks, or the user's own English.
+    // 文件 field: prefix + name + .png. With translation on, the middle is the English and is editable.
     if (englishOverride && englishOverride.source !== zh) { englishOverride = null; } // the Chinese changed
-    if (S.translate) {
-      var auto = current && zh ? autoEnglish(zh) : null, overriding = !!englishOverride;
-      el.englishAuto.hidden = overriding; el.englishName.hidden = !overriding;
-      el.englishEdit.hidden = overriding; el.englishReset.hidden = !overriding;
-      el.englishEdit.disabled = !auto || !!job; el.englishName.disabled = !!job; el.englishReset.disabled = !!job;
-      clear(el.englishAuto);
-      if (overriding) { if (document.activeElement !== el.englishName) { el.englishName.value = englishOverride.value; } }
-      else if (auto) {
-        var counts = {dict: 0, none: 0};
-        if (el.prefix.value) { el.englishAuto.appendChild(make('span', 'fixed', el.prefix.value)); }
-        auto.parts.forEach(function (p, i) {
-          if (i) { el.englishAuto.appendChild(document.createTextNode('_')); el.englishAuto.appendChild(make('wbr')); }
-          var span = make('span', p.source === 'dict' || p.source === 'none' ? 'part-' + p.source : null, p.out);
-          span.title = p.src + ' → ' + p.out + '（' + ({user: '我的术语表', builtin: '内置术语表', dict: '离线词典，建议核对', none: '没有找到译法', ascii: '原文'}[p.source]) + '）';
-          if (counts[p.source] != null) { counts[p.source]++; }
-          el.englishAuto.appendChild(span);
-        });
-        el.englishAuto.appendChild(make('wbr')); el.englishAuto.appendChild(make('span', 'fixed', '.png'));
-        note = counts.dict || counts.none ? counts : null;
-      } else { el.englishAuto.appendChild(make('span', 'empty', translatorError ? '翻译数据加载失败' : '—')); }
-    } else {
-      englishOverride = null;
-      el.englishAuto.hidden = true; el.englishName.hidden = true; el.englishEdit.hidden = true; el.englishReset.hidden = true;
-    }
-    el.fileName.hidden = S.translate; // with translation on, the English box is the file name
-    clear(el.fileName);
-    if (!current) { el.fileName.textContent = '—'; }
-    else if (!zh) { el.fileName.appendChild(make('span', 'warn', '请填写导出名称')); }
-    else { el.fileName.textContent = M.outputFiles.nameFor(el.prefix.value, finalName(zh)) + '.png'; }
-    el.fileName.title = (el.fileName.textContent || '') + '（同名文件不会覆盖，自动追加 -2、-3…）';
-    // The note line is reserved while translation is on, so the layout never jumps.
+    var auto = S.translate && current && zh ? autoEnglish(zh) : null, editing = document.activeElement === el.englishName;
+    var shown = !current ? '' : !S.translate ? zh : englishOverride ? englishOverride.value : (auto ? auto.text : zh);
+    setText(el.filePrefix, el.prefix.value); el.filePrefix.hidden = !el.prefix.value;
+    el.englishName.readOnly = !S.translate || !current; el.englishName.disabled = !!job;
+    el.englishName.placeholder = !current ? '—' : !zh ? '请填写名称' : '';
+    if (!editing && el.englishName.value !== shown) { el.englishName.value = shown; }
+    el.englishReset.hidden = !englishOverride; el.englishReset.disabled = !!job;
+    fitFileInput();
+    el.englishRow.className = 'file-field ' + (S.translate && current ? 'editable' : 'readonly') + (englishOverride ? ' overridden' : '') + (editing && S.translate ? ' focused' : '');
+    var full = current && zh ? M.outputFiles.nameFor(el.prefix.value, finalName(zh)) + '.png' : '';
+    setText(el.fileName, full); el.englishRow.title = full ? full + '（同名文件不会覆盖，自动追加 -2、-3…）' : '';
+    // Under the field: the exact words worth checking, or a short how-to.
     clear(el.translateNote); el.translateNote.hidden = !S.translate;
-    if (S.translate && englishOverride) {
-      el.translateNote.appendChild(document.createTextNode((el.prefix.value ? '前缀和 .png 会自动加上。' : '.png 会自动加上。') + 'Enter 导出，Esc 恢复'));
-    } else if (note) {
-      if (note.dict) { el.translateNote.appendChild(make('i', 'k-dict', '黄色 ' + note.dict + ' 个是词典译法，建议核对')); }
-      if (note.dict && note.none) { el.translateNote.appendChild(document.createTextNode('；')); }
-      if (note.none) { el.translateNote.appendChild(make('i', 'k-none', '红色 ' + note.none + ' 个没找到')); }
+    if (S.translate) {
+      var flagged = auto && !englishOverride ? auto.parts.filter(function (p) { return p.source === 'dict' || p.source === 'none'; }) : [];
+      if (flagged.length) {
+        el.translateNote.appendChild(document.createTextNode('需核对：'));
+        flagged.forEach(function (p) {
+          var chip = make('span', 'check-chip ' + p.source, p.source === 'dict' ? p.src + ' → ' + p.out : p.src + '（未翻译）');
+          chip.title = p.source === 'dict' ? '离线词典的译法。点击选中，直接输入替换' : '没有找到译法，保留了中文。点击选中，直接输入英文';
+          chip.addEventListener('mousedown', function (e) { e.preventDefault(); selectWord(p.out); });
+          el.translateNote.appendChild(chip);
+        });
+      } else if (englishOverride) { el.translateNote.appendChild(document.createTextNode('已手动修改，导出后会记到我的术语表。')); }
+      else if (current && zh) { el.translateNote.appendChild(document.createTextNode('英文可以直接修改，导出后会自动记住。')); }
     }
-    el.translateNote.title = note ? '点“修改”改英文，导出后会记到我的术语表' : '';
     el.translate.checked = S.translate;
     el.translate.disabled = !!job;
     el.clearPrefix.hidden = !el.prefix.value;
@@ -378,10 +378,6 @@
     el.lockSize.disabled = busy || (!S.sizeLocked && !lockable);
     el.lockSize.title = S.sizeLocked ? '已固定：之后每张切图都按这个尺寸输出。点击解除' : lockable ? '固定后，之后的每张切图都按这个尺寸输出' : '先填写宽或高，再点固定';
     el.sizeGroup.className = 'form-row' + (S.sizeLocked ? ' size-locked' : '');
-    setText(el.anchorHint, S.anchor === 'topLeft' ? '透明边只加在右侧和下方' : '透明边平均分布在四周');
-    el.anchorCenter.disabled = busy; el.anchorTopLeft.disabled = busy;
-    el.anchorCenter.setAttribute('aria-checked', String(S.anchor === 'center'));
-    el.anchorTopLeft.setAttribute('aria-checked', String(S.anchor === 'topLeft'));
     el.superPNG.disabled = busy; el.addDirectory.disabled = busy || choosingFolder; el.refresh.disabled = busy;
     var min = minSize();
     el.minWidth.parentNode.className = 'field size-field' + (min.wOk ? '' : ' invalid');
@@ -636,32 +632,24 @@
       if (S.translate && !getTranslator()) { setStatus('error', '翻译数据加载失败', translatorError || ''); }
       render();
     });
-    function editEnglish() {
-      if (job || !current) { return; }
-      var zh = M.naming.normalize(el.exportName.value), auto = autoEnglish(zh);
-      if (!auto) { return; }
-      englishOverride = {source: zh, value: auto.text}; render();
-      el.englishName.value = englishOverride.value; el.englishName.focus(); el.englishName.select();
-    }
-    el.englishEdit.addEventListener('click', editEnglish);
-    el.englishAuto.addEventListener('click', editEnglish);
-    el.englishAuto.addEventListener('keydown', function (e) { if (e.keyCode === 13 || e.keyCode === 32) { editEnglish(); } });
+    // Typing in the 文件 field overrides the automatic English for this Chinese name.
     ['input', 'change', 'compositionend', 'keyup'].forEach(function (type) {
       el.englishName.addEventListener(type, function () {
-        var v = el.englishName.value.replace(/[\r\n]+/g, '');
-        if (v !== el.englishName.value) { el.englishName.value = v; }
-        if (englishOverride && englishOverride.value !== v) { englishOverride.value = v; renderNaming(); }
+        if (!S.translate || el.englishName.readOnly) { return; }
+        var zh = M.naming.normalize(el.exportName.value), v = el.englishName.value, auto = autoEnglish(zh);
+        if (auto && v === auto.text) { englishOverride = null; }
+        else if (!englishOverride || englishOverride.value !== v) { englishOverride = {source: zh, value: v}; }
+        renderNaming();
       });
     });
+    el.englishName.addEventListener('focus', function () { renderNaming(); });
     el.englishName.addEventListener('blur', function () {
-      // An empty edit, or one identical to the automatic English, is not an override.
-      var auto = englishOverride && autoEnglish(englishOverride.source);
-      if (englishOverride && (!englishOverride.value.trim() || (auto && englishOverride.value.trim() === auto.text))) { englishOverride = null; }
+      if (englishOverride && !englishOverride.value.trim()) { englishOverride = null; } // emptied: back to automatic
       render();
     });
     el.englishName.addEventListener('keydown', function (e) {
-      if (e.keyCode === 13) { e.preventDefault(); var d = recentDirectory(); if (d) { exportTo(d); } } // no line breaks in a file name
-      else if (e.keyCode === 27) { englishOverride = null; render(); }
+      if (e.keyCode === 13) { e.preventDefault(); var d = recentDirectory(); if (d) { exportTo(d); } }
+      else if (e.keyCode === 27) { englishOverride = null; el.englishName.blur(); render(); }
     });
     el.englishReset.addEventListener('click', function () { englishOverride = null; render(); });
     el.openGlossary.addEventListener('click', function () {
@@ -682,8 +670,6 @@
     el.cancelJob.addEventListener('click', cancelCurrent);
     el.statusOpen.addEventListener('click', function () { if (lastResult && lastResult.directory) { openFolder(lastResult.directory); } });
     el.addDirectory.addEventListener('click', addDirectory);
-    el.anchorCenter.addEventListener('click', function () { S.anchor = 'center'; persist(); render(); });
-    el.anchorTopLeft.addEventListener('click', function () { S.anchor = 'topLeft'; persist(); render(); });
     el.superPNG.addEventListener('change', function () { S.superPNG = !!el.superPNG.checked; persist(); logger.info('setting', '切图 SuperPNG ' + (S.superPNG ? '开启' : '关闭')); render(); });
     el.lockSize.addEventListener('click', function () {
       if (job) { return; }

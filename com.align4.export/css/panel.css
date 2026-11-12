@@ -134,28 +134,31 @@ strong.size-value { color: var(--text); font-weight: 600; }
 .field-clear:hover { color: var(--text); background: var(--surface-strong); }
 .name-field { flex: 1; min-width: 0; }
 .name-field.custom input { border-color: var(--accent-soft); }
-/* English (translation on): the whole file name, wrapping to a fixed two lines — never cut off, never resizing. */
-.english-box { flex: 1; min-width: 0; }
-.file-box, .english-auto, .english-input { display: block; width: 100%; height: 52px; margin: 0; padding: 6px 10px; border-radius: 6px; font: 12px/19px var(--mono); word-break: normal; word-wrap: break-word; overflow: hidden; resize: none; } /* wraps at the <wbr> after each _ */
-.file-box { border: 1px solid var(--border); background: var(--surface); color: var(--text); }
-.file-box .warn { color: var(--warn); font-family: inherit; }
-.english-auto { border: 1px dashed var(--border-strong); color: var(--text); cursor: text; }
-.english-auto:hover, .english-auto:focus { border-color: var(--accent); outline: none; }
-.english-auto .fixed { color: var(--faint); }
-.english-auto .empty { color: var(--faint); font-family: inherit; }
-.english-auto .part-dict { color: var(--warn); border-bottom: 1px dotted currentColor; }
-.english-auto .part-none { color: var(--err); border-bottom: 1px dotted currentColor; }
-.english-input { border: 1px solid var(--accent); background: var(--field); box-shadow: 0 0 0 2px var(--accent-soft); color: var(--text); }
-.english-input:disabled { opacity: .5; }
-.english-button { flex: 0 0 auto; height: 34px; margin-left: 6px; border: 1px solid var(--border); color: var(--text); }
+/* 文件: one field that is the file name — fixed prefix and .png in grey, the name in between.
+   With translation on, the middle is the English and can be typed into directly. */
+.file-field { position: relative; display: flex; align-items: center; height: 34px; padding: 0 9px; border-radius: 6px; border: 1px solid var(--border); background: var(--field); }
+.file-field.readonly { background: var(--surface); }
+.file-field.editable:hover { border-color: var(--border-strong); }
+.file-field.focused { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.file-field.overridden { padding-right: 52px; }
+.file-fix { flex: 0 0 auto; color: var(--faint); white-space: pre; }
+.file-input { flex: 0 1 auto; width: 40px; min-width: 24px; max-width: 100%; height: 32px; padding: 0 1px; border: 0; background: transparent; color: var(--text); font: inherit; }
+.file-input[readonly] { cursor: default; }
+.file-input::-webkit-input-placeholder { color: var(--faint); }
+.file-field .field-action { top: 5px; }
+.file-measure { position: absolute; left: -9999px; top: 0; visibility: hidden; white-space: pre; font: inherit; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+/* Words worth a second look, named individually; click one to select it in the field */
+.check-chip { display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 4px; line-height: 16px; cursor: pointer; }
+.check-chip.dict { color: var(--warn); background: rgba(231, 180, 79, .12); }
+.check-chip.none { color: var(--err); background: rgba(240, 114, 124, .12); }
+.check-chip:hover { text-decoration: underline; }
 /* "用图层名" sits inside the name box, shown only after the name was changed */
 .name-field.custom input { padding-right: 70px; }
 .field-action { position: absolute; right: 5px; top: 6px; height: 22px; padding: 0 7px; border-radius: 4px; font-size: 10.5px; color: var(--accent); background: var(--accent-soft); white-space: nowrap; }
 .field-action:hover:not(:disabled) { background: var(--accent); color: var(--accent-ink); }
 .translate-note { height: 16px; line-height: 16px; margin-top: 5px; font-size: 10.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .translate-note i { font-style: normal; }
-.translate-note .k-dict { color: var(--warn); }
-.translate-note .k-none { color: var(--err); }
 
 .size-row { display: flex; align-items: center; }
 .size-field { width: 92px; flex: 0 1 92px; min-width: 64px; }
