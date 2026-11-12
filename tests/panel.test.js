@@ -217,21 +217,47 @@ test('the clicked directory button turns into a cancel button while exporting', 
   await wait(400); assert.deepEqual(fs.readdirSync(p.out), []);
 });
 
-test('translation: English file names, colour-marked guesses, and corrections are remembered', async t => {
-  const appdata = fs.mkdtempSync(path.join(os.tmpdir(), 'align4-test-appdata-'));
-  process.env.APPDATA = appdata; t.after(() => { delete process.env.APPDATA; fs.rmSync(appdata, {recursive: true, force: true}); });
+function appdata(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'align4-test-appdata-'));
+  process.env.APPDATA = dir; t.after(() => { delete process.env.APPDATA; fs.rmSync(dir, {recursive: true, force: true}); });
+  return dir;
+}
+const text = n => n.children.map(c => c.textContent).join('');
+
+test('translation: a typed Chinese name becomes an English file name; typed English is kept as written', async t => {
+  appdata(t);
+  const p = boot(t, {settings: {translate: true}});
+  await until(() => p.exportButton() && !p.exportButton().disabled);
+  assert.equal(p.nodes.englishRow.hidden, false);
+  p.nodes.exportName.value = '聊天 装饰 气泡'; p.nodes.exportName.fire('input');
+  await wait(20);
+  assert.equal(text(p.nodes.englishAuto), 'chat_deco_bubble');
+  assert.equal(p.nodes.fileName.textContent, 'chat_deco_bubble.png');
+  p.exportButton().fire('click');
+  await until(() => fs.readdirSync(p.out).length === 1);
+  assert.deepEqual(fs.readdirSync(p.out), ['chat_deco_bubble.png']);
+  p.nodes.exportName.value = 'btnConfirm'; p.nodes.exportName.fire('input'); await wait(20);
+  assert.equal(p.nodes.fileName.textContent, 'btnConfirm.png');
+});
+
+test('translation: fixing the English in its own row is remembered for next time', async t => {
+  const dir = appdata(t);
   const p = boot(t, {settings: {translate: true}});
   p.select({token: '1|8|1', name: '头像闪光', kind: '图层', revision: '3'});
-  await until(() => p.nodes.exportName.value === 'avatar_flash');
-  assert.match(p.nodes.translateNote.children.map(c => c.textContent).join(''), /离线词典/);
-  p.nodes.exportName.value = 'avatar_shine'; p.nodes.exportName.fire('input');
-  await wait(20);
+  await until(() => text(p.nodes.englishAuto) === 'avatar_flash');
+  assert.match(text(p.nodes.translateNote), /离线词典/);
+  p.nodes.englishEdit.fire('click');
+  assert.equal(p.nodes.englishName.hidden, false); assert.equal(p.nodes.englishName.value, 'avatar_flash');
+  p.nodes.englishName.value = 'avatar_shine'; p.nodes.englishName.fire('input');
+  assert.equal(p.nodes.exportName.value, '头像闪光', 'the Chinese name is untouched');
+  assert.equal(p.nodes.fileName.textContent, 'avatar_shine.png');
   p.exportButton().fire('click');
   await until(() => fs.readdirSync(p.out).length === 1);
   assert.deepEqual(fs.readdirSync(p.out), ['avatar_shine.png']);
-  const glossary = path.join(appdata, 'Align4Export', '我的术语表.csv');
+  const glossary = path.join(dir, 'Align4Export', '我的术语表.csv');
   await until(() => fs.existsSync(glossary));
   assert.match(fs.readFileSync(glossary, 'utf8'), /闪光,shine/);
   p.select({token: '1|9|1', name: '按钮闪光', kind: '图层', revision: '3'});
-  await until(() => p.nodes.exportName.value === 'btn_shine');
+  await until(() => text(p.nodes.englishAuto) === 'btn_shine');
+  assert.equal(p.nodes.englishName.hidden, true, 'a new name starts from the automatic English again');
 });

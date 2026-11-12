@@ -7,7 +7,7 @@
     superpng: 'SuperPNG 编码', write: '写入文件', done: '完成'};
 
   var ids = ['openLog', 'objectKind', 'refresh', 'objectName', 'sizeSource', 'sizeTarget', 'objectHint',
-    'resetName', 'translate', 'openGlossary', 'translateNote', 'sizeHint', 'lockSize', 'prefix', 'clearPrefix', 'exportName', 'fileName', 'sizeGroup', 'minWidth', 'minHeight', 'anchorCenter', 'anchorTopLeft',
+    'resetName', 'translate', 'openGlossary', 'translateNote', 'englishRow', 'englishAuto', 'englishName', 'englishEdit', 'englishReset', 'sizeHint', 'lockSize', 'prefix', 'clearPrefix', 'exportName', 'fileName', 'sizeGroup', 'minWidth', 'minHeight', 'anchorCenter', 'anchorTopLeft',
     'superPNG', 'directoryCount', 'addDirectory', 'directoryList', 'statusbar', 'statusTitle', 'statusDetail', 'statusOpen', 'statusLog',
     'cancelJob', 'canvasIcon', 'canvasDirName', 'canvasDirPath', 'canvasLast', 'canvasFolder', 'canvasSuperPNG', 'canvasExport', 'logPanel', 'logVerbose', 'logCopy', 'logFolder', 'logClose', 'logList', 'logNote', 'version', 'restoreSize', 'debug'];
   var el = {};
@@ -112,7 +112,21 @@
     } catch (e) { translatorError = String(e.message || e); logger.error('translate', '翻译数据加载失败：' + translatorError); }
     return translator;
   }
-  function translateName(name) { var t = S.translate && getTranslator(); return t ? t.translate(name).text : name; }
+  var CJK = /[\u3400-\u9fff]/;
+  // English text is used exactly as typed; only Chinese gets translated.
+  function autoEnglish(zh) {
+    if (!S.translate || !zh) { return null; }
+    if (!CJK.test(zh)) { return {text: zh, parts: [{src: zh, out: zh, source: 'ascii'}]}; }
+    var t = getTranslator(); return t ? t.translate(zh) : null;
+  }
+  function translateName(name) { var a = autoEnglish(name); return a ? a.text : name; }
+  // The user's English for the current Chinese name (from the "改" row), if any.
+  var englishOverride = null; // {source, value}
+  function finalName(zh) {
+    if (!S.translate) { return zh; }
+    if (englishOverride && englishOverride.source === zh && englishOverride.value.trim()) { return englishOverride.value.trim(); }
+    return translateName(zh);
+  }
   function ensureUserGlossary() {
     var p = userGlossaryPath();
     if (M.fs.existsSync(p)) { return p; }
@@ -198,26 +212,34 @@
     if (el.exportName.value !== nm.value) { el.exportName.value = nm.value; }
     el.exportName.parentNode.className = 'field name-field' + (nm.edited ? ' custom' : '');
     el.resetName.disabled = !nm.edited || !!job;
-    el.resetName.textContent = S.translate ? '用自动译名' : '用图层名';
-    var name = M.naming.normalize(el.exportName.value), note = null;
+    el.resetName.textContent = '用图层名';
+    var zh = M.naming.normalize(el.exportName.value), note = null;
+    // English row (translation on): automatic English with source marks, or the user's own English.
+    el.englishRow.hidden = !S.translate;
+    if (englishOverride && englishOverride.source !== zh) { englishOverride = null; } // the Chinese changed
+    if (S.translate) {
+      var auto = current && zh ? autoEnglish(zh) : null, overriding = !!englishOverride;
+      el.englishAuto.hidden = overriding; el.englishName.hidden = !overriding;
+      el.englishEdit.hidden = overriding; el.englishReset.hidden = !overriding;
+      el.englishEdit.disabled = !auto || !!job; el.englishName.disabled = !!job; el.englishReset.disabled = !!job;
+      clear(el.englishAuto);
+      if (overriding) { if (document.activeElement !== el.englishName) { el.englishName.value = englishOverride.value; } }
+      else if (auto) {
+        var counts = {dict: 0, none: 0};
+        auto.parts.forEach(function (p, i) {
+          if (i) { el.englishAuto.appendChild(document.createTextNode('_')); }
+          var span = make('span', p.source === 'dict' || p.source === 'none' ? 'part-' + p.source : null, p.out);
+          span.title = p.src + ' → ' + p.out + '（' + ({user: '我的术语表', builtin: '内置术语表', dict: '离线词典，建议核对', none: '没有找到译法', ascii: '原文'}[p.source]) + '）';
+          if (counts[p.source] != null) { counts[p.source]++; }
+          el.englishAuto.appendChild(span);
+        });
+        note = counts.dict || counts.none ? counts : null;
+      } else { el.englishAuto.appendChild(make('span', 'empty', translatorError ? '翻译数据加载失败' : '—')); }
+    }
     clear(el.fileName);
     if (!current) { el.fileName.textContent = '—'; }
-    else if (!name) { el.fileName.appendChild(make('span', 'warn', '请填写导出名称')); }
-    else if (S.translate && !nm.edited && getTranslator()) {
-      // Show where each word came from: dictionary guesses and untranslated words are marked.
-      var tr = translator.translate(M.naming.normalize(current.name)), counts = {dict: 0, none: 0};
-      if (el.prefix.value) { el.fileName.appendChild(document.createTextNode(M.outputFiles.baseName(el.prefix.value))); }
-      tr.parts.forEach(function (p, i) {
-        if (i) { el.fileName.appendChild(document.createTextNode('_')); }
-        var span = make('span', p.source === 'dict' || p.source === 'none' ? 'part-' + p.source : null, p.out);
-        span.title = p.src + ' → ' + p.out + '（' + ({user: '我的术语表', builtin: '内置术语表', dict: '离线词典，建议核对', none: '没有找到译法', ascii: '原文'}[p.source]) + '）';
-        if (counts[p.source] != null) { counts[p.source]++; }
-        el.fileName.appendChild(span);
-      });
-      el.fileName.appendChild(document.createTextNode('.png'));
-      note = counts.dict || counts.none ? counts : null;
-    }
-    else { el.fileName.textContent = M.outputFiles.nameFor(el.prefix.value, name) + '.png'; }
+    else if (!zh) { el.fileName.appendChild(make('span', 'warn', '请填写导出名称')); }
+    else { el.fileName.textContent = M.outputFiles.nameFor(el.prefix.value, finalName(zh)) + '.png'; }
     el.fileName.title = (el.fileName.textContent || '') + '（同名文件不会覆盖，自动追加 -2、-3…）';
     // The note line is reserved while translation is on, so the layout never jumps.
     clear(el.translateNote); el.translateNote.hidden = !S.translate;
@@ -225,9 +247,10 @@
       if (note.dict) { el.translateNote.appendChild(make('i', 'k-dict', '黄色 ' + note.dict + ' 个来自离线词典，建议核对')); }
       if (note.dict && note.none) { el.translateNote.appendChild(document.createTextNode('；')); }
       if (note.none) { el.translateNote.appendChild(make('i', 'k-none', '红色 ' + note.none + ' 个没找到，保留中文')); }
-      el.translateNote.appendChild(document.createTextNode('。直接改名称再导出，会记到我的术语表。'));
+      el.translateNote.appendChild(document.createTextNode('。点“改”修改英文，导出后会记到我的术语表。'));
     }
     el.translate.checked = S.translate;
+    el.translate.disabled = !!job;
     el.clearPrefix.hidden = !el.prefix.value;
   }
 
@@ -421,7 +444,10 @@
       namer.resolve(meta, function (error, name, custom) {
         if (job !== mine) { return; }
         if (error) { end(mine, error); return; }
-        mine.naming = {source: M.naming.normalize(meta.name), name: name, custom: custom};
+        var english = finalName(name);
+        mine.naming = {source: name, name: english, override: !!(S.translate && englishOverride && englishOverride.source === name)};
+        if (english !== name) { logger.info('translate', '「' + name + '」→ ' + english + (mine.naming.override ? '（手动修改）' : ''), undefined, mine.id); }
+        name = english;
         logger.info('export.object', meta.kind + '「' + meta.name + '」，文件名 ' + M.outputFiles.nameFor(S.prefix, name) + '.png' + (custom ? '（自定义）' : ''), {token: meta.token, revision: meta.revision}, job.id);
         runPipeline(meta, name, min);
       });
@@ -482,11 +508,12 @@
       lastResult = record;
       logger.info('export.end', '成功，总用时 ' + took, {file: record.file}, finished.id);
       var learned = 0;
-      if (S.translate && finished.naming && finished.naming.custom && getTranslator()) {
+      if (S.translate && finished.naming && finished.naming.override && getTranslator()) {
         try {
           var pairs = translator.learn(finished.naming.source, finished.naming.name);
           learned = rememberTranslations(pairs);
-          if (learned) { logger.info('translate', '记住 ' + learned + ' 条译法', {pairs: pairs}, finished.id); namer.retransform(); }
+          if (learned) { logger.info('translate', '记住 ' + learned + ' 条译法', {pairs: pairs}, finished.id); }
+          englishOverride = null; // the glossary now produces this English automatically
         } catch (e) { logger.warn('translate', '保存译法失败：' + String(e.message || e)); }
       }
       var padded = record.width !== record.originalWidth || record.height !== record.originalHeight;
@@ -602,8 +629,32 @@
       S.translate = !!el.translate.checked; persist();
       logger.info('setting', '翻译成英文 ' + (S.translate ? '开启' : '关闭'));
       if (S.translate && !getTranslator()) { setStatus('error', '翻译数据加载失败', translatorError || ''); }
-      namer.retransform(); render();
+      render();
     });
+    function editEnglish() {
+      if (job || !current) { return; }
+      var zh = M.naming.normalize(el.exportName.value), auto = autoEnglish(zh);
+      if (!auto) { return; }
+      englishOverride = {source: zh, value: auto.text}; render();
+      el.englishName.value = englishOverride.value; el.englishName.focus(); el.englishName.select();
+    }
+    el.englishEdit.addEventListener('click', editEnglish);
+    el.englishAuto.addEventListener('click', editEnglish);
+    el.englishAuto.addEventListener('keydown', function (e) { if (e.keyCode === 13 || e.keyCode === 32) { editEnglish(); } });
+    ['input', 'change', 'compositionend', 'keyup'].forEach(function (type) {
+      el.englishName.addEventListener(type, function () { if (englishOverride && englishOverride.value !== el.englishName.value) { englishOverride.value = el.englishName.value; renderNaming(); } });
+    });
+    el.englishName.addEventListener('blur', function () {
+      // An empty edit, or one identical to the automatic English, is not an override.
+      var auto = englishOverride && autoEnglish(englishOverride.source);
+      if (englishOverride && (!englishOverride.value.trim() || (auto && englishOverride.value.trim() === auto.text))) { englishOverride = null; }
+      render();
+    });
+    el.englishName.addEventListener('keydown', function (e) {
+      if (e.keyCode === 13) { var d = recentDirectory(); if (d) { exportTo(d); } }
+      else if (e.keyCode === 27) { englishOverride = null; render(); }
+    });
+    el.englishReset.addEventListener('click', function () { englishOverride = null; render(); });
     el.openGlossary.addEventListener('click', function () {
       try { var p = ensureUserGlossary(); host('Align4.openFile(' + quote(p) + ')', function (r) { if (!r.ok) { setStatus('error', '无法打开术语表', r.message + ' ' + p); } }); }
       catch (e) { setStatus('error', '无法创建术语表', String(e.message || e)); }
@@ -652,7 +703,7 @@
     });
     el.resetName.addEventListener('click', function () { namer.reset(); el.exportName.value = namer.state().value; render(); });
     document.addEventListener('visibilitychange', function () { if (!document.hidden && tracker) { tracker.poke(); } });
-    window.addEventListener('focus', function () { existsCache = {}; if (S.translate && translator) { namer.retransform(); } if (tracker) { tracker.poke(); } });
+    window.addEventListener('focus', function () { existsCache = {}; if (S.translate && translator) { renderNaming(); } if (tracker) { tracker.poke(); } });
     window.addEventListener('beforeunload', cleanup);
     window.addEventListener('error', function (e) { if (logger) { logger.error('script', '面板脚本错误：' + (e && e.message), {file: e && e.filename, line: e && e.lineno, stack: e && e.error && e.error.stack}); } });
   }
@@ -722,7 +773,6 @@
 
     namer = M.naming.create({
       query: function (cb) { host('Align4.selectionToken()', cb); },
-      transform: translateName,
       onChange: function () { if (M && S) { renderNaming(); renderDirectories(); if (!job && status && (status.kind === 'ready' || status.kind === 'warn') && !status.sticky) { idleStatus(); } } },
       onOwnerResolved: function () { if (tracker) { tracker.poke(); } }
     });

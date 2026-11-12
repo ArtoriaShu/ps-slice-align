@@ -11,9 +11,9 @@ const builtin = t.loadGlossary(fs.readFileSync(path.join(DATA, 'glossary.csv'), 
 const dict = JSON.parse(fs.readFileSync(path.join(DATA, 'dict.json'), 'utf8')).words;
 function translator(user = {}) { return t.create({user: () => user, builtin, dict}); }
 
-test('glossary CSV: BOM, quotes, comments, "-" drops a word, first row wins, English normalised', () => {
+test('glossary CSV: BOM, quotes, comments, "-" drops a word, first row wins', () => {
   const map = t.loadGlossary('﻿中文,英文\n# 注释,x\n按钮,btn\n按钮,button\n"装饰,图",Deco Thing\n的,-\n空,\n');
-  assert.deepEqual(map, {'按钮': 'btn', '装饰,图': 'deco_thing', '的': ''});
+  assert.deepEqual(map, {'按钮': 'btn', '装饰,图': 'Deco_Thing', '的': ''}, 'English keeps its case; spaces become _');
 });
 
 test('built-in glossary is well-formed', () => {
@@ -57,4 +57,8 @@ test('learning: a restructured name is learned as a whole-name entry; no-ops lea
   assert.deepEqual(translator().learn('聊天系统装饰图', 'chat_bubble_deco'), [['聊天系统装饰图', 'chat_bubble_deco']]);
   assert.deepEqual(translator().learn('按钮/确认', 'btn_confirm'), []);
   assert.deepEqual(translator().learn('按钮_䶮䶮', 'btn_䶮䶮䶮'), [], 'Chinese is never learned as a translation');
+});
+
+test('English mixed into a Chinese name keeps its case', () => {
+  assert.equal(translator().translate('BtnOK确认').text, 'BtnOK_confirm');
 });

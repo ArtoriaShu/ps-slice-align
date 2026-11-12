@@ -1,5 +1,5 @@
 'use strict';
-// Offline slice-name translation: Chinese layer names -> lower_snake_case English.
+// Offline slice-name translation: Chinese names -> English words joined with "_".
 // Lookup order for every word: the user's glossary > built-in UI glossary > CC-CEDICT.
 // Words found nowhere stay in Chinese (no pinyin), so they are easy to spot and fix.
 
@@ -34,7 +34,7 @@ function cleanEnglish(value) {
   var v = String(value || '').trim();
   if (v === '-') { return ''; }
   if (CJK.test(v)) { return v.replace(/\s+/g, '_'); }
-  return v.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  return v.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, ''); // case kept: English is used as written
 }
 
 // Glossary CSV -> {中文: english}. First row wins; "#" rows and the header are ignored.
@@ -96,7 +96,7 @@ exports.create = function (o) {
     var tokens = name.match(/[㐀-鿿]+|[A-Za-z0-9]+/g) || [];
     tokens.forEach(function (t) {
       if (CJK.test(t)) { segment(t, parts); }
-      else { parts.push({src: t, out: t.toLowerCase(), source: 'ascii'}); }
+      else { parts.push({src: t, out: t, source: 'ascii'}); }
     });
     return result(parts, name);
   }
