@@ -55,17 +55,18 @@ test('canvas mode queries the document instead of the selection', () => {
 
 function memoryStorage(init = {}) { const m = new Map(Object.entries(init)); return {getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, v), m}; }
 
-test('settings migrate presets, main and canvas directories from 1.x without duplicates', () => {
+test('settings migrate presets and the main directory from 1.x; the canvas directory stays separate', () => {
   const st = memoryStorage({'align4-directory-presets': JSON.stringify([{path: 'D:\\切图', name: '切图'}, {path: 'D:\\icons'}]),
     'align4-export-directory': 'D:\\切图\\', 'align4-canvas-directory': 'E:\\整图', 'align4-filename-prefix': 'ui_', 'align4-superpng': '1'});
   const s = settings.load(st);
-  assert.deepEqual(s.directories.map(d => d.path), ['D:\\切图', 'D:\\icons', 'E:\\整图']);
+  assert.deepEqual(s.directories.map(d => d.path), ['D:\\切图', 'D:\\icons']);
+  assert.equal(s.canvasDirectory, 'E:\\整图'); assert.equal(s.canvasSuperPNG, false);
   assert.equal(s.directories[1].name, 'icons'); assert.equal(s.prefix, 'ui_'); assert.equal(s.superPNG, true);
-  s.mode = 'canvas'; settings.save(st, s);
-  const again = settings.load(st); assert.equal(again.mode, 'canvas'); assert.equal(again.directories.length, 3);
+  s.canvasSuperPNG = true; settings.save(st, s);
+  const again = settings.load(st); assert.equal(again.canvasSuperPNG, true); assert.equal(again.directories.length, 2);
 });
 
 test('settings survive corrupt storage', () => {
   const s = settings.load(memoryStorage({'align4-settings-v2': '{oops'}));
-  assert.equal(s.mode, 'selection'); assert.deepEqual(s.directories, []);
+  assert.deepEqual(s.directories, []); assert.equal(s.canvasDirectory, '');
 });

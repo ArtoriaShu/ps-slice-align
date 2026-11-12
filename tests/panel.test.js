@@ -38,7 +38,9 @@ function boot(t, opts = {}) {
   const logs = fs.mkdtempSync(path.join(os.tmpdir(), 'align4-test-panel-log-'));
   t.after(() => { fs.rmSync(out, {recursive: true, force: true}); fs.rmSync(logs, {recursive: true, force: true}); });
   process.env.ALIGN4_LOG_DIR = logs; t.after(() => { delete process.env.ALIGN4_LOG_DIR; });
-  const nodes = {}, scripts = [], storage = new Map(opts.storage ? Object.entries(opts.storage) : [['align4-settings-v2', JSON.stringify({directories: [{id: 'd1', path: out, name: '输出'}]})]]);
+  const settings = Object.assign({directories: [{id: 'd1', path: out, name: '输出'}]}, opts.settings);
+  if (opts.canvasHere) { settings.canvasDirectory = out; }
+  const nodes = {}, scripts = [], storage = new Map(opts.storage ? Object.entries(opts.storage) : [['align4-settings-v2', JSON.stringify(settings)]]);
   let selected = {token: '1|5|1', name: '按钮', kind: '图层', revision: '3'};
   function getElementById(id) { if (!nodes[id]) { nodes[id] = node('div'); nodes[id].parentNode = node('div'); } return nodes[id]; }
   const timers = new Set();
@@ -54,7 +56,7 @@ function boot(t, opts = {}) {
       evalScript(script, cb) {
         scripts.push(script);
         const reply = v => setTimeout(() => cb(JSON.stringify(v)), 1);
-        if (script === 'Align4.describeSelection()' || script === 'Align4.selectionToken()') return reply(Object.assign({ok: true}, selected));
+        if (script === 'Align4.describeSelection()' || script === 'Align4.selectionToken()') return reply(selected.fail ? {ok: false, message: '每次只选择一个图层、图层组或画板。'} : Object.assign({ok: true}, selected));
         if (script === 'Align4.describeDocument()') return reply({ok: true, token: '1|canvas', name: '设计稿', kind: '整个画布', width: 9, height: 7, revision: '3'});
         if (script === 'Align4.eventIDs()') return reply({ok: true, events: []});
         if (script === 'Align4.environment()') return reply({ok: true, photoshop: '21.2'});
@@ -109,22 +111,79 @@ test('typing a name then pressing Enter exports with that name to the most recen
   assert.equal(JSON.parse(p.storage.get('align4-settings-v2')).prefix, 'ui_');
 });
 
-test('canvas mode exports the whole document', async t => {
-  const p = boot(t);
-  await until(() => p.exportButton() && !p.exportButton().disabled);
-  p.nodes.modeCanvas.fire('click');
-  await until(() => p.nodes.objectName.textContent === '设计稿');
-  assert.equal(p.nodes.sizeSource.textContent, '9 × 7'); assert.equal(p.nodes.sizeTarget.textContent, '12 × 8');
-  await until(() => p.exportButton() && !p.exportButton().disabled && p.exportButton().textContent === '导出整图');
-  p.exportButton().fire('click');
+test('the separate canvas button exports the whole document without SuperPNG by default', async t => {
+  // Slice SuperPNG is on; canvas has its own switch, which defaults to off.
+  const p = boot(t, {canvasHere: true, settings: {superPNG: true}});
+  await until(() => !p.nodes.canvasExport.disabled);
+  assert.equal(p.nodes.canvasSuperPNG.checked, false);
+  p.nodes.canvasExport.fire('click');
   await until(() => fs.readdirSync(p.out).length === 1);
   assert.deepEqual(fs.readdirSync(p.out), ['设计稿.png']);
+  const parsed = png.parse(fs.readFileSync(path.join(p.out, '设计稿.png'))); assert.deepEqual([parsed.width, parsed.height], [12, 8]);
+  assert.equal(p.scripts.filter(s => s.startsWith('Align4.convertSuperPNG')).length, 0);
+  await until(() => /整图已导出/.test(p.nodes.statusTitle.textContent));
+  assert.match(p.nodes.canvasLast.textContent, /设计稿\.png · 12×8/);
+});
+
+test('canvas export stays available when the layer selection is invalid', async t => {
+  const p = boot(t, {canvasHere: true});
+  p.select({fail: true}); // e.g. several layers selected
+  await until(() => /每次只选择一个/.test(p.nodes.objectName.textContent));
+  assert.equal(p.exportButton().disabled, true);
+  assert.equal(p.nodes.canvasExport.disabled, false);
+});
+
+test('without a canvas directory the canvas button is disabled until one is chosen', async t => {
+  const p = boot(t);
+  await until(() => p.nodes.objectName.textContent === '按钮');
+  assert.equal(p.nodes.canvasExport.disabled, true); assert.equal(p.nodes.canvasFolder.textContent, '选择目录');
 });
 
 test('1.x settings are migrated on first start', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'align4-test-migrate-'));
   t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
-  const p = boot(t, {storage: {'align4-export-directory': dir, 'align4-filename-prefix': 'old_', 'align4-superpng': '0'}});
+  const p = boot(t, {storage: {'align4-export-directory': dir, 'align4-canvas-directory': dir, 'align4-filename-prefix': 'old_', 'align4-superpng': '1'}});
   await until(() => p.nodes.directoryList.children.length === 1);
-  assert.equal(p.nodes.prefix.value, 'old_');
+  assert.equal(p.nodes.prefix.value, 'old_'); assert.equal(p.nodes.superPNG.checked, true);
+  await until(() => p.nodes.canvasDirPath.textContent === dir);
+  assert.equal(p.nodes.canvasSuperPNG.checked, false, 'canvas SuperPNG starts off even when slice SuperPNG was on');
+});
+
+test('a fixed size survives selection changes and is used for every export', async t => {
+  const p = boot(t);
+  await until(() => p.exportButton() && !p.exportButton().disabled);
+  assert.equal(p.nodes.lockSize.disabled, true, 'nothing to lock yet');
+  p.nodes.minWidth.value = '62'; p.nodes.minWidth.fire('input');
+  p.nodes.minHeight.value = '40'; p.nodes.minHeight.fire('input');
+  p.nodes.lockSize.fire('click');
+  assert.equal(p.nodes.lockSize.attributes['aria-pressed'], 'true');
+  assert.equal(String(p.nodes.minWidth.value), '64', 'rounded up to a multiple of 4 when fixed');
+  assert.equal(p.nodes.minWidth.disabled, true);
+  p.select({token: '1|6|1', name: '图标', kind: '图层', revision: '3'});
+  await until(() => p.nodes.objectName.textContent === '图标');
+  assert.equal(String(p.nodes.minWidth.value), '64'); assert.equal(String(p.nodes.minHeight.value), '40');
+  p.exportButton().fire('click');
+  await until(() => fs.readdirSync(p.out).length === 1);
+  const parsed = png.parse(fs.readFileSync(path.join(p.out, '图标.png'))); assert.deepEqual([parsed.width, parsed.height], [64, 40]);
+  assert.equal(JSON.parse(p.storage.get('align4-settings-v2')).sizeLocked, true);
+});
+
+test('an unfixed size applies only to the current object', async t => {
+  const p = boot(t);
+  await until(() => p.exportButton() && !p.exportButton().disabled);
+  p.nodes.minWidth.value = '100'; p.nodes.minWidth.fire('input');
+  p.select({token: '1|6|1', name: '图标', kind: '图层', revision: '3'});
+  await until(() => p.nodes.objectName.textContent === '图标');
+  assert.equal(p.nodes.minWidth.value, '');
+});
+
+test('an image larger than the fixed size is padded from its own size, never shrunk, and flagged', async t => {
+  const p = boot(t);
+  await until(() => p.exportButton() && !p.exportButton().disabled);
+  p.nodes.minWidth.value = '4'; p.nodes.minWidth.fire('input'); p.nodes.minHeight.value = '4'; p.nodes.minHeight.fire('input');
+  p.nodes.lockSize.fire('click');
+  p.exportButton().fire('click');
+  await until(() => fs.readdirSync(p.out).length === 1);
+  const parsed = png.parse(fs.readFileSync(path.join(p.out, '按钮.png'))); assert.deepEqual([parsed.width, parsed.height], [8, 4]);
+  await until(() => /大于固定尺寸/.test(p.nodes.statusTitle.textContent));
 });

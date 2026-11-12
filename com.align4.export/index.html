@@ -7,9 +7,6 @@
 <div class="app" id="app">
  <header class="topbar">
   <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span>4 倍数导出</span></div>
-  <div class="segmented mode-switch" role="tablist" aria-label="导出对象">
-   <button id="modeSelection" role="tab" title="导出选中的图层 / 图层组 / 画板">切图</button><button id="modeCanvas" role="tab" title="导出整张画布，不受选中图层影响">整图</button>
-  </div>
   <button id="openLog" class="ghost-button" title="运行日志与诊断信息">日志</button>
  </header>
 
@@ -38,11 +35,12 @@
    </section>
 
    <section class="group" id="sizeGroup">
-    <div class="group-head"><h2>输出尺寸</h2><span class="muted">留空自动补齐到 4 的倍数</span></div>
+    <div class="group-head"><h2>输出尺寸</h2><span id="sizeHint" class="muted">留空自动补齐到 4 的倍数</span></div>
     <div class="size-row">
      <label class="field size-field"><span>宽</span><input id="minWidth" type="number" min="1" max="30000" step="1" placeholder="自动" aria-label="最小输出宽度"></label>
      <span class="times">×</span>
      <label class="field size-field"><span>高</span><input id="minHeight" type="number" min="1" max="30000" step="1" placeholder="自动" aria-label="最小输出高度"></label>
+     <button id="lockSize" class="lock-button" aria-pressed="false" title="固定后，之后的每张切图都按这个尺寸输出"><svg viewBox="0 0 14 14" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="2.5" y="6" width="9" height="6.5" rx="1.3"/><path class="shackle" d="M4.5 6V4.3a2.5 2.5 0 0 1 5 0V6"/></svg><span>固定</span></button>
      <div class="segmented small anchor-switch" role="radiogroup" aria-label="补边位置">
       <button id="anchorCenter" role="radio" title="透明边均匀分布在四周">居中</button><button id="anchorTopLeft" role="radio" title="透明边只加在右侧和下方">左上</button>
      </div>
@@ -50,13 +48,29 @@
    </section>
 
    <label class="toggle-row" title="补边后调用已安装的 SuperPNG 重新编码；失败时不会改存普通 PNG">
-    <input id="superPNG" type="checkbox"><span class="toggle" aria-hidden="true"></span><span>使用 SuperPNG 编码</span><span class="muted">需先安装 SuperPNG</span>
+    <input id="superPNG" type="checkbox"><span class="toggle" aria-hidden="true"></span><span>切图使用 SuperPNG 编码</span><span class="muted">需先安装 SuperPNG</span>
    </label>
   </main>
 
   <aside class="destinations" aria-label="导出目录">
    <div class="dest-head"><h2>导出到</h2><span id="directoryCount" class="count">0</span><button id="addDirectory" class="link-button">＋ 添加目录</button></div>
    <div id="directoryList" class="dest-list"></div>
+   <section class="canvas-card" aria-label="整图导出">
+    <div class="canvas-head"><h2>整图导出</h2><span class="muted">整张画布，不受选中图层影响</span></div>
+    <div class="canvas-dir">
+     <span class="dest-icon" id="canvasIcon" aria-hidden="true"></span>
+     <div class="dest-main">
+      <strong id="canvasDirName" class="canvas-dir-name">未选择目录</strong>
+      <p id="canvasDirPath" class="dest-path">整图使用单独的目录</p>
+      <p id="canvasLast" class="dest-last" hidden></p>
+     </div>
+     <button id="canvasFolder" class="ghost-button">选择目录</button>
+    </div>
+    <div class="canvas-actions">
+     <label class="toggle-row small" title="整图单独设置，默认关闭"><input id="canvasSuperPNG" type="checkbox"><span class="toggle" aria-hidden="true"></span><span>SuperPNG 编码</span></label>
+     <button id="canvasExport" class="canvas-export" disabled>导出整图</button>
+    </div>
+   </section>
   </aside>
  </div>
 

@@ -149,7 +149,7 @@
       window.__adobe_cep__ = bridge;
       try {
         if (!localStorage.getItem('align4-settings-v2')) {
-          localStorage.setItem('align4-settings-v2', JSON.stringify({mode: 'selection', prefix: '', directories: [
+          localStorage.setItem('align4-settings-v2', JSON.stringify({prefix: '', canvasDirectory: 'E:\\临时\\整图', directories: [
             {id: 'a', path: 'D:\\项目\\首页改版\\切图', name: '切图', lastExport: {ok: true, time: Date.now() - 3600000, file: '按钮_确认.png', width: 480, height: 112}},
             {id: 'b', path: 'D:\\项目\\首页改版\\icons', name: 'icons', lastExport: null},
             {id: 'c', path: '\\\\NAS\\设计交付\\2026-11', name: '交付', lastExport: null}]}));
