@@ -42,6 +42,7 @@ function boot(t, opts = {}) {
   if (opts.canvasHere) { settings.canvasDirectory = out; }
   const nodes = {}, scripts = [], storage = new Map(opts.storage ? Object.entries(opts.storage) : [['align4-settings-v2', JSON.stringify(settings)]]);
   let selected = {token: '1|5|1', name: '按钮', kind: '图层', revision: '3'};
+  const p0 = {slowNext: false};
   function getElementById(id) { if (!nodes[id]) { nodes[id] = node('div'); nodes[id].parentNode = node('div'); } return nodes[id]; }
   const timers = new Set();
   const win = {
@@ -55,7 +56,7 @@ function boot(t, opts = {}) {
       addEventListener() {}, removeEventListener() {}, dispatchEvent() {}, resizeContent() {},
       evalScript(script, cb) {
         scripts.push(script);
-        const reply = v => setTimeout(() => cb(JSON.stringify(v)), 1);
+        const reply = v => setTimeout(() => cb(JSON.stringify(v)), p0.slowNext && /describeSelection/.test(script) && !(p0.slowNext = false) ? 200 : 1);
         if (script === 'Align4.describeSelection()' || script === 'Align4.selectionToken()') return reply(selected.fail ? {ok: false, message: '每次只选择一个图层、图层组或画板。'} : Object.assign({ok: true}, selected));
         if (script === 'Align4.describeDocument()') return reply({ok: true, token: '1|canvas', name: '设计稿', kind: '整个画布', width: 9, height: 7, revision: '3'});
         if (script === 'Align4.eventIDs()') return reply({ok: true, events: []});
@@ -76,7 +77,7 @@ function boot(t, opts = {}) {
   const context = vm.createContext({window: win, document: doc, JSON, Date, Error, Math, Object, Array, String, Number, Buffer, decodeURI, isFinite, require, process});
   vm.runInContext(fs.readFileSync(path.join(ROOT, 'js/panel.js'), 'utf8'), context);
   t.after(() => { try { win.Align4Panel && win.Align4Panel.tracker().stop(); } catch (e) {} timers.forEach(h => { clearTimeout(h); clearInterval(h); }); });
-  return {nodes, scripts, out, logs, storage, api: win.Align4Panel, select(s) { selected = s; },
+  return {nodes, scripts, out, logs, storage, api: win.Align4Panel, slowNextDescribe() { p0.slowNext = true; }, select(s) { selected = s; },
     exportButton() { const row = nodes.directoryList.children[0]; return row && row.children[2]; }};
 }
 
@@ -186,4 +187,20 @@ test('an image larger than the fixed size is padded from its own size, never shr
   await until(() => fs.readdirSync(p.out).length === 1);
   const parsed = png.parse(fs.readFileSync(path.join(p.out, '按钮.png'))); assert.deepEqual([parsed.width, parsed.height], [8, 4]);
   await until(() => /大于固定尺寸/.test(p.nodes.statusTitle.textContent));
+});
+
+test('cancelling before Photoshop answers ends the job, and a late reply cannot hijack the next export', async t => {
+  const p = boot(t);
+  await until(() => p.exportButton() && !p.exportButton().disabled);
+  p.slowNextDescribe(); p.exportButton().fire('click');
+  assert.equal(p.scripts.filter(s => s.startsWith('Align4.startNative')).length, 0, 'still waiting for Photoshop');
+  assert.equal(p.nodes.cancelJob.hidden, false);
+  p.nodes.cancelJob.fire('click');
+  await until(() => /已取消/.test(p.nodes.statusTitle.textContent), 500);
+  await wait(400); // the cancelled job's late describe reply arrives here
+  assert.deepEqual(fs.readdirSync(p.out), []);
+  assert.equal(p.scripts.filter(s => s.startsWith('Align4.startNative')).length, 0, 'the late reply must not start an export');
+  await until(() => p.exportButton() && !p.exportButton().disabled);
+  p.exportButton().fire('click');
+  await until(() => fs.readdirSync(p.out).length === 1);
 });

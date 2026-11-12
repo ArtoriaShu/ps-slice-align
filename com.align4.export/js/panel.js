@@ -35,9 +35,11 @@
   function host(script, callback, timeout) {
     if (!bridge) { callback({ok: false, message: '请从 Photoshop 中打开插件。'}); return; }
     var name = script.slice(0, script.indexOf('(')), t0 = now(), done = false;
-    var watchdog = timeout === 0 ? null : window.setTimeout(function () {
-      deliver({ok: false, code: 'ALIGN4_HOST_TIMEOUT', message: 'Photoshop 脚本在 25 秒内未响应。可能正忙于其它操作，请稍后重试；如持续出现，请复制诊断信息。'});
-    }, 25000);
+    // SuperPNG re-encodes the whole padded image inside Photoshop; big canvases need longer.
+    var limit = timeout != null ? timeout : (/^Align4\.convertSuperPNG\(/.test(script) ? 180000 : 25000);
+    var watchdog = limit === 0 ? null : window.setTimeout(function () {
+      deliver({ok: false, code: 'ALIGN4_HOST_TIMEOUT', message: 'Photoshop 脚本在 ' + Math.round(limit / 1000) + ' 秒内未响应。可能正忙于其它操作，请稍后重试；如持续出现，请复制诊断信息。'});
+    }, limit);
     function deliver(r) {
       if (done) { return; } done = true;
       if (watchdog !== null) { window.clearTimeout(watchdog); }
@@ -182,7 +184,9 @@
       var name = make('input', 'dest-name'); name.type = 'text'; name.value = d.name; name.setAttribute('data-id', d.id); name.title = '点击修改显示名称'; name.disabled = blocked; name.setAttribute('aria-label', '目录名称');
       name.addEventListener('change', function () { d.name = name.value.trim() || M.settings.basename(d.path); name.value = d.name; persist(); });
       name.addEventListener('keydown', function (e) { if (e.keyCode === 13) { name.blur(); } });
-      var path = make('p', 'dest-path', exists ? d.path : '目录不存在：' + d.path); path.title = d.path;
+      var path = make('p', 'dest-path' + (exists ? ' openable' : ''), exists ? d.path : '目录不存在：' + d.path);
+      path.title = exists ? '点击打开：' + d.path : d.path;
+      if (exists) { path.addEventListener('click', function () { openFolder(d.path); }); }
       main.appendChild(name); main.appendChild(path);
       if (d.lastExport) { var last = make('p', 'dest-last ' + (d.lastExport.ok ? 'ok' : 'error'), lastText(d.lastExport)); last.title = last.textContent; main.appendChild(last); }
       var btn = make('button', 'dest-export');
@@ -193,7 +197,8 @@
         btn.title = !exists ? '目录不存在，请移除后重新添加' : cannot || ('导出到 ' + d.path);
       }
       btn.addEventListener('click', function () { exportTo(d); });
-      var remove = make('button', 'dest-remove' + (pendingRemove === d.id ? ' confirm' : ''), pendingRemove === d.id ? '确认移除' : '×');
+      var remove = make('button', 'dest-remove' + (pendingRemove === d.id ? ' confirm' : ''), pendingRemove === d.id ? '确认移除' : null);
+      if (pendingRemove !== d.id) { remove.innerHTML = '<svg viewBox="0 0 10 10" width="8" height="8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7"/></svg>'; }
       remove.title = '从列表中移除（不会删除文件夹）'; remove.disabled = blocked; remove.setAttribute('aria-label', '移除目录 ' + d.name);
       remove.addEventListener('click', function () { removeDirectory(d); });
       row.appendChild(icon); row.appendChild(main); row.appendChild(btn); row.appendChild(remove);
@@ -212,7 +217,8 @@
     if (!el.canvasIcon.innerHTML) { el.canvasIcon.innerHTML = CANVAS_SVG; }
     setText(el.canvasDirName, dir ? M.settings.basename(dir) : '未选择目录');
     setText(el.canvasDirPath, dir ? (exists ? dir : '目录不存在：' + dir) : '整图使用单独的目录，与切图目录分开');
-    el.canvasDirPath.title = dir || '';
+    el.canvasDirPath.title = exists ? '点击打开：' + dir : (dir || '');
+    el.canvasDirPath.className = 'dest-path' + (exists ? ' openable' : '');
     setText(el.canvasFolder, dir ? '更换' : '选择目录'); el.canvasFolder.disabled = blocked;
     var le = S.canvasLastExport;
     el.canvasLast.hidden = !le;
@@ -290,14 +296,15 @@
     pendingRemove = null; tracker.pause();
     logger.info('export.start', '开始' + (scope === 'canvas' ? '整图' : '切图') + '导出 → ' + target.label, details, job.id);
     showJobStatus();
+    return job;
   }
   function runPipeline(meta, name, min) {
-    var t = job.target;
+    var mine = job, t = mine.target;
     job.handle = M.exportJob.run({fs: M.fs, path: M.path, os: M.os, png: M.png, rules: M.rules, outputFiles: M.outputFiles, nativeExport: M.nativeExport, superPNG: M.superPNG,
       host: host, now: now, setTimeout: function (fn, ms) { return window.setTimeout(fn, ms); }, clearTimeout: function (h) { window.clearTimeout(h); }, log: logger, job: job.id}, {
       scope: job.scope, meta: meta, name: name, prefix: S.prefix, directory: t.path, minWidth: min.width, minHeight: min.height, anchor: S.anchor, superPNG: t.superPNG,
       onStage: function (stage, detail) { if (!job) { return; } job.stage = stage; if (detail && detail.attempts) { job.attempts = detail.attempts; } showJobStatus(); }
-    }, function (error, record) { end(error, record, meta); });
+    }, function (error, record) { end(mine, error, record, meta); });
   }
 
   function exportTo(d) {
@@ -305,16 +312,16 @@
     if (!directoryExists(d.path)) { existsCache = {}; setStatus('error', '目录不存在', d.path); render(); return; }
     var min = minSize();
     if (!min.ok) { setStatus('error', '输出尺寸无效', '宽高需为 1–30000 的整数，或留空自动补齐。'); return; }
-    startJob('selection', {id: d.id, label: d.name, path: d.path, superPNG: S.superPNG, setLast: function (le) { d.lastExport = le; }},
+    var mine = startJob('selection', {id: d.id, label: d.name, path: d.path, superPNG: S.superPNG, setLast: function (le) { d.lastExport = le; }},
       {directory: d.path, prefix: S.prefix, typedName: el.exportName.value, minWidth: min.width, minHeight: min.height, sizeLocked: S.sizeLocked, anchor: S.anchor, superPNG: S.superPNG});
-    job.locked = S.sizeLocked; job.min = min;
+    mine.locked = S.sizeLocked; mine.min = min;
     host('Align4.describeSelection()', function (meta) {
-      if (!job) { return; }
-      if (!meta.ok) { end(new Error(meta.message)); return; }
+      if (job !== mine) { return; } // cancelled meanwhile
+      if (!meta.ok) { end(mine, new Error(meta.message)); return; }
       current = meta;
       namer.resolve(meta, function (error, name, custom) {
-        if (!job) { return; }
-        if (error) { end(error); return; }
+        if (job !== mine) { return; }
+        if (error) { end(mine, error); return; }
         logger.info('export.object', meta.kind + '「' + meta.name + '」，文件名 ' + M.outputFiles.nameFor(S.prefix, name) + '.png' + (custom ? '（自定义）' : ''), {token: meta.token, revision: meta.revision}, job.id);
         runPipeline(meta, name, min);
       });
@@ -326,11 +333,11 @@
     var dir = S.canvasDirectory;
     if (!dir) { chooseCanvasFolder(); return; }
     if (!directoryExists(dir)) { existsCache = {}; setStatus('error', '整图目录不存在', dir); render(); return; }
-    startJob('canvas', {id: 'canvas', label: '整图目录', path: dir, superPNG: S.canvasSuperPNG, setLast: function (le) { S.canvasLastExport = le; }},
+    var mine = startJob('canvas', {id: 'canvas', label: '整图目录', path: dir, superPNG: S.canvasSuperPNG, setLast: function (le) { S.canvasLastExport = le; }},
       {directory: dir, prefix: S.prefix, anchor: S.anchor, superPNG: S.canvasSuperPNG});
     host('Align4.describeDocument()', function (meta) {
-      if (!job) { return; }
-      if (!meta.ok) { end(new Error(meta.message)); return; }
+      if (job !== mine) { return; }
+      if (!meta.ok) { end(mine, new Error(meta.message)); return; }
       var name = M.naming.normalize(meta.name) || 'canvas';
       logger.info('export.object', '文档「' + meta.name + '」' + meta.width + '×' + meta.height + '，文件名 ' + M.outputFiles.nameFor(S.prefix, name) + '.png', {token: meta.token, revision: meta.revision}, job.id);
       runPipeline(meta, name, {width: 0, height: 0});
@@ -350,8 +357,9 @@
     if (ticker === null) { ticker = window.setInterval(function () { if (job) { showJobStatus(); } else { window.clearInterval(ticker); ticker = null; } }, 500); }
   }
 
-  function end(error, record, meta) {
-    var finished = job, t = finished.target; job = null;
+  function end(finished, error, record, meta) {
+    if (!finished || job !== finished) { return; }
+    var t = finished.target; job = null;
     if (ticker !== null) { window.clearInterval(ticker); ticker = null; }
     var took = seconds(now() - finished.started);
     if (error) {
@@ -372,6 +380,10 @@
     }
     tracker.resume(); tracker.refresh();
     render(); renderStatus();
+  }
+
+  function openFolder(dir) {
+    host('Align4.openFolder(' + quote(dir) + ')', function (r) { if (!r.ok) { setStatus('error', '无法打开目录', r.message); } });
   }
 
   // ---------- Directories ----------
@@ -471,6 +483,7 @@
   function bind() {
     el.canvasFolder.addEventListener('click', function () { chooseCanvasFolder(); });
     el.canvasExport.addEventListener('click', exportCanvas);
+    el.canvasDirPath.addEventListener('click', function () { if (S.canvasDirectory && directoryExists(S.canvasDirectory)) { openFolder(S.canvasDirectory); } });
     el.canvasSuperPNG.addEventListener('change', function () { S.canvasSuperPNG = !!el.canvasSuperPNG.checked; persist(); logger.info('setting', '整图 SuperPNG ' + (S.canvasSuperPNG ? '开启' : '关闭')); render(); });
     el.refresh.addEventListener('click', function () { existsCache = {}; status = null; tracker.refresh(); render(); });
     el.openLog.addEventListener('click', function () { setLogOpen(true); });
@@ -480,10 +493,12 @@
     el.logCopy.addEventListener('click', copyDiagnostics);
     el.logFolder.addEventListener('click', function () { if (logger.dir) { host('Align4.openFolder(' + quote(logger.dir) + ')', function (r) { if (!r.ok) { setStatus('error', '无法打开日志目录', r.message); } }); } });
     el.restoreSize.addEventListener('click', function () { try { bridge.resizeContent(760, 620); } catch (e) {} });
-    el.cancelJob.addEventListener('click', function () { if (job && job.handle) { job.handle.cancel(); } });
-    el.statusOpen.addEventListener('click', function () {
-      if (lastResult && lastResult.directory) { host('Align4.openFolder(' + quote(lastResult.directory) + ')', function (r) { if (!r.ok) { setStatus('error', '无法打开目录', r.message); } }); }
+    el.cancelJob.addEventListener('click', function () {
+      if (!job) { return; }
+      if (job.handle) { job.handle.cancel(); } // reports back through end()
+      else { end(job, Object.assign(new Error('已取消导出。'), {code: 'ALIGN4_CANCELLED'})); }
     });
+    el.statusOpen.addEventListener('click', function () { if (lastResult && lastResult.directory) { openFolder(lastResult.directory); } });
     el.addDirectory.addEventListener('click', addDirectory);
     el.anchorCenter.addEventListener('click', function () { S.anchor = 'center'; persist(); render(); });
     el.anchorTopLeft.addEventListener('click', function () { S.anchor = 'topLeft'; persist(); render(); });
@@ -590,6 +605,7 @@
     tracker = M.selection.create({host: host, setTimeout: function (fn, ms) { return window.setTimeout(fn, ms); }, clearTimeout: function (t) { window.clearTimeout(t); },
       hidden: function () { return !!document.hidden; }, mode: function () { return 'selection'; }, onChange: onSelection, onError: onTrackerError});
 
+    if (!S.sizeLocked) { S.minWidth = ''; S.minHeight = ''; }
     el.prefix.value = S.prefix; el.superPNG.checked = S.superPNG; el.minWidth.value = S.minWidth || ''; el.minHeight.value = S.minHeight || '';
     setText(el.version, 'v' + VERSION);
     applyTheme(); bind(); render();

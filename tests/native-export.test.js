@@ -84,6 +84,13 @@ test('nothing ever appears: times out after the configured resends with a clear 
   assert.ok(r.at - r.started >= 90000);
 });
 
+test('a command that times out in Photoshop keeps waiting, because the PNG may still come', t => {
+  const w = world(t, ({at, write, callback}) => { at(25000, () => { callback({ok: false, code: 'ALIGN4_HOST_TIMEOUT'}); write('late.png', image(7, 7)); }); });
+  const r = w.run();
+  assert.ifError(r.error); assert.equal(r.result.measured.width, 7); assert.equal(r.commands.length, 1, 'no resend while the PNG arrives promptly');
+  assert.ok(w.logger.entries().some(e => /继续等待/.test(e.message)));
+});
+
 test('a host failure (e.g. selection changed) on a re-send stops the job', t => {
   const w = world(t, ({number, callback}) => callback(number === 1 ? {ok: true} : {ok: false, message: '选择已改变'}));
   const r = w.run();

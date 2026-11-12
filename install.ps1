@@ -7,6 +7,8 @@ if (-not (Test-Path (Join-Path $taskSource 'CSXS\manifest.xml'))) {
 }
 if ($taskDest.Contains('#')) { throw 'CEP does not support # in the installation path. Use a Windows account without # in its profile path.' }
 New-Item -ItemType Directory -Path $taskDestRoot -Force | Out-Null
+# Remove the previous install first so files deleted in newer versions do not linger.
+if (Test-Path -LiteralPath $taskDest) { Remove-Item -LiteralPath $taskDest -Recurse -Force }
 Copy-Item -LiteralPath $taskSource -Destination $taskDestRoot -Recurse -Force
 foreach ($taskCepVersion in @(9,10,11,12)) {
     $taskRegistryPath = "HKCU:\Software\Adobe\CSXS.$taskCepVersion"

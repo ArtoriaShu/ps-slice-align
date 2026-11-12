@@ -85,16 +85,23 @@ exports.run = function (o, spec, callback) {
     o.host(spec.script(dir), function (r) {
       if (finished) { return; }
       var ms = o.now() - t0;
-      if (!r || !r.ok) {
+      if (r && r.code === 'ALIGN4_HOST_TIMEOUT') {
+        // Photoshop is still busy with the command (large PSDs can block here);
+        // the PNG may yet appear, so keep watching instead of giving up.
+        log.warn('native.command', 'Photoshop 在 ' + Math.round(ms / 1000) + ' 秒内没有返回命令结果，可能仍在处理，继续等待 PNG', {attempt: number}, o.job);
+      } else if (!r || !r.ok) {
         var error = new Error((r && r.message) || '快速导出命令失败。');
         error.code = r && r.code;
         log.error('native.command', '命令返回失败（' + ms + 'ms）', {attempt: number, code: error.code, message: error.message}, o.job);
         finish(error);
         return;
+      } else {
+        log.debug('native.command', '命令已被 Photoshop 接受（' + ms + 'ms）', {attempt: number}, o.job);
       }
       attempt.sent = true;
-      log.debug('native.command', '命令已被 Photoshop 接受（' + ms + 'ms）', {attempt: number}, o.job);
-      if (started === null) { started = t0; state.phase = 'waiting'; schedule(0); }
+      // Resend deadlines and the overall timeout count from when Photoshop
+      // handed the command over, not from when it was queued.
+      if (started === null) { started = o.now(); state.phase = 'waiting'; schedule(0); }
     });
   }
 
