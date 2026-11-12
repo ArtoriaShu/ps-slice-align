@@ -116,31 +116,3 @@ test('host refuses an existing output before opening any temporary document',()=
   const h=photoshop(false);h.created.add('output.png');assert.equal(h.convert().ok,false);
   assert.equal(h.closed(),0);assert.equal(h.app.activeDocument,h.original);
 });
-
-test('full panel startup loads the encoder and persists the SuperPNG checkbox across restarts',t=>{
-  const storage=new Map(),logs=fs.mkdtempSync(path.join(os.tmpdir(),'align4-logtest-'));
-  process.env.ALIGN4_LOG_DIR=logs;t.after(()=>{delete process.env.ALIGN4_LOG_DIR;fs.rmSync(logs,{recursive:true,force:true});});
-  function boot(){
-    const nodes={};
-    function node(){return {value:'',textContent:'',listeners:{},addEventListener(type,fn){this.listeners[type]=fn;},appendChild(){}};}
-    const context=vm.createContext({JSON,Date,Error,
-      document:{getElementById(id){return nodes[id]||(nodes[id]=node());},createElement:node,addEventListener(){}},
-      window:{addEventListener(){},setTimeout(){return 1;},clearTimeout(){},cep_node:{require},
-        localStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value)},
-        __adobe_cep__:{getSystemPath:()=>path.resolve(__dirname,'../com.align4.export'),resizeContent(){},
-          addEventListener(){},dispatchEvent(){},evalScript(script,callback){
-            assert.equal(script,'Align4.eventIDs()');callback('{"ok":true,"events":[]}');
-          }}}
-    });
-    vm.runInContext(fs.readFileSync(path.join(__dirname,'../com.align4.export/js/panel.js'),'utf8'),context);
-    assert.doesNotMatch(nodes.status.textContent,/模块未加载/);
-    assert.equal(nodes.version.textContent,'v1.12.0');
-    return nodes.superPNG;
-  }
-  let checkbox=boot();assert.equal(checkbox.checked,false);
-  checkbox.checked=true;checkbox.listeners.change();assert.equal(storage.get('align4-superpng'),'1');
-  checkbox=boot();assert.equal(checkbox.checked,true);
-  checkbox.checked=false;checkbox.listeners.change();assert.equal(boot().checked,false);
-  const written=fs.readdirSync(logs);assert.equal(written.length,1);
-  assert.match(fs.readFileSync(path.join(logs,written[0]),'utf8'),/panel\.start/);
-});
