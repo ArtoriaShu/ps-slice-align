@@ -154,7 +154,25 @@
   var FOLDER_SVG = '<svg viewBox="0 0 18 18" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2 5.2c0-.9.7-1.6 1.6-1.6h3.2l1.6 1.8h6c.9 0 1.6.7 1.6 1.6v6.6c0 .9-.7 1.6-1.6 1.6H3.6c-.9 0-1.6-.7-1.6-1.6V5.2z"/></svg>';
   var CANVAS_SVG = '<svg viewBox="0 0 18 18" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="2.5" y="3" width="13" height="12" rx="1.6"/><path d="M2.5 11.5l3.6-3.4 3 2.8 2.2-2 4.2 3.8"/></svg>';
 
-  function runningButton(btn) { clear(btn); btn.innerHTML = '<span class="spinner"></span>'; btn.appendChild(document.createTextNode(seconds(now() - job.started))); btn.disabled = true; }
+  // While exporting, the clicked button shows the elapsed time and becomes "取消" on hover.
+  function runningButton(btn) {
+    clear(btn);
+    var time = make('span', 'run-time');
+    time.appendChild(make('span', 'spinner')); time.appendChild(make('span', 'run-seconds', seconds(now() - job.started)));
+    btn.appendChild(time); btn.appendChild(make('span', 'run-cancel', '取消'));
+    btn.disabled = false; btn.title = '点击取消这次导出';
+    btn.className = btn.className.replace(/\s*running-button/g, '') + ' running-button';
+  }
+  function cancelCurrent() {
+    if (!job) { return; }
+    var stage = job.stage;
+    if (job.handle) { job.handle.cancel(); } // reports back through end()
+    else { end(job, Object.assign(new Error('已取消导出。'), {code: 'ALIGN4_CANCELLED'})); }
+    if (stage === 'superpng' && status) {
+      // An ExtendScript call cannot be interrupted; Photoshop finishes it in the background.
+      status.detail = 'Photoshop 可能还在完成这次 SuperPNG 编码，结果不会保存。稍等几秒再导出。'; renderStatus();
+    }
+  }
 
   function renderDirectories() {
     // The list is rebuilt on every refresh (selection changes, every 0.5s while
@@ -196,7 +214,7 @@
         btn.disabled = blocked || !!cannot || !exists;
         btn.title = !exists ? '目录不存在，请移除后重新添加' : cannot || ('导出到 ' + d.path);
       }
-      btn.addEventListener('click', function () { exportTo(d); });
+      btn.addEventListener('click', function () { if (running) { cancelCurrent(); } else { exportTo(d); } });
       var remove = make('button', 'dest-remove' + (pendingRemove === d.id ? ' confirm' : ''), pendingRemove === d.id ? '确认移除' : null);
       if (pendingRemove !== d.id) { remove.innerHTML = '<svg viewBox="0 0 10 10" width="8" height="8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7"/></svg>'; }
       remove.title = '从列表中移除（不会删除文件夹）'; remove.disabled = blocked; remove.setAttribute('aria-label', '移除目录 ' + d.name);
@@ -226,6 +244,7 @@
     el.canvasSuperPNG.checked = S.canvasSuperPNG; el.canvasSuperPNG.disabled = blocked;
     if (running) { runningButton(el.canvasExport); }
     else {
+      el.canvasExport.className = 'canvas-export';
       setText(el.canvasExport, '导出整图');
       el.canvasExport.disabled = blocked || !exists;
       el.canvasExport.title = !dir ? '先选择整图目录' : !exists ? '目录不存在，请点“更换”' : '导出整张画布到 ' + dir + '（文件名：前缀 + 文档名）';
@@ -347,13 +366,21 @@
   var ticker = null;
   function showJobStatus() {
     if (!job) { return; }
-    var elapsed = now() - job.started, detail = seconds(elapsed);
+    var elapsed = now() - job.started, detail = '已用 ' + seconds(elapsed);
     if (job.stage === 'native') {
       if (job.attempts > 1) { detail += ' · Generator 没有响应，已自动重发 ' + (job.attempts - 1) + ' 次'; }
-      else if (elapsed > 5000) { detail += ' · 大文件需要更久，请稍候'; }
-    }
+      else if (elapsed > 5000) { detail += ' · 大文件需要更久，最多等 90 秒'; }
+    } else if (job.stage === 'superpng' && elapsed > 5000) { detail += ' · 大图编码较慢，最多等 180 秒'; }
+    detail += ' · 可随时取消';
     status = {kind: 'working', title: (job.scope === 'canvas' ? '整图：' : '') + (STAGE_TEXT[job.stage] || job.stage) + '…', detail: detail};
-    renderStatus(); renderControls(); renderDirectories(); renderCanvas();
+    renderStatus();
+    var key = job.id + ':' + job.stage + ':' + job.attempts;
+    if (job.rendered !== key) { job.rendered = key; renderControls(); renderDirectories(); renderCanvas(); }
+    else {
+      // Tick: update the timers in place so hovering "取消" is not disturbed by a rebuild.
+      var spans = document.querySelectorAll ? document.querySelectorAll('.run-seconds') : [];
+      for (var i = 0; i < spans.length; i++) { spans[i].textContent = seconds(elapsed); }
+    }
     if (ticker === null) { ticker = window.setInterval(function () { if (job) { showJobStatus(); } else { window.clearInterval(ticker); ticker = null; } }, 500); }
   }
 
@@ -482,7 +509,7 @@
   // ---------- Events ----------
   function bind() {
     el.canvasFolder.addEventListener('click', function () { chooseCanvasFolder(); });
-    el.canvasExport.addEventListener('click', exportCanvas);
+    el.canvasExport.addEventListener('click', function () { if (job && job.target.id === 'canvas') { cancelCurrent(); } else { exportCanvas(); } });
     el.canvasDirPath.addEventListener('click', function () { if (S.canvasDirectory && directoryExists(S.canvasDirectory)) { openFolder(S.canvasDirectory); } });
     el.canvasSuperPNG.addEventListener('change', function () { S.canvasSuperPNG = !!el.canvasSuperPNG.checked; persist(); logger.info('setting', '整图 SuperPNG ' + (S.canvasSuperPNG ? '开启' : '关闭')); render(); });
     el.refresh.addEventListener('click', function () { existsCache = {}; status = null; tracker.refresh(); render(); });
@@ -493,11 +520,7 @@
     el.logCopy.addEventListener('click', copyDiagnostics);
     el.logFolder.addEventListener('click', function () { if (logger.dir) { host('Align4.openFolder(' + quote(logger.dir) + ')', function (r) { if (!r.ok) { setStatus('error', '无法打开日志目录', r.message); } }); } });
     el.restoreSize.addEventListener('click', function () { try { bridge.resizeContent(760, 620); } catch (e) {} });
-    el.cancelJob.addEventListener('click', function () {
-      if (!job) { return; }
-      if (job.handle) { job.handle.cancel(); } // reports back through end()
-      else { end(job, Object.assign(new Error('已取消导出。'), {code: 'ALIGN4_CANCELLED'})); }
-    });
+    el.cancelJob.addEventListener('click', cancelCurrent);
     el.statusOpen.addEventListener('click', function () { if (lastResult && lastResult.directory) { openFolder(lastResult.directory); } });
     el.addDirectory.addEventListener('click', addDirectory);
     el.anchorCenter.addEventListener('click', function () { S.anchor = 'center'; persist(); render(); });

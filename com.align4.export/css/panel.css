@@ -155,10 +155,10 @@ strong.size-value { color: var(--text); font-weight: 600; }
 .toggle-row .muted { margin-left: 8px; }
 
 /* ---- Destinations ---- */
-.dest-head { display: flex; align-items: center; height: 46px; flex: 0 0 46px; padding: 4px 16px 0; }
+.dest-head { display: flex; align-items: center; height: 40px; flex: 0 0 40px; padding: 4px 16px 0; }
 .count { margin-left: 6px; min-width: 18px; height: 16px; line-height: 16px; padding: 0 5px; border-radius: 8px; text-align: center; font-size: 10px; color: var(--muted); background: var(--surface-strong); }
 .dest-head .link-button { margin-left: auto; }
-.dest-list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 10px 10px; }
+.dest-list { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 10px 10px; } /* top room for the first row's remove badge */
 
 .dest { position: relative; display: flex; align-items: center; padding: 10px 10px 10px 12px; border-radius: 8px; border: 1px solid transparent; }
 .dest + .dest { margin-top: 4px; }
@@ -182,6 +182,10 @@ strong.size-value { color: var(--text); font-weight: 600; }
 .dest:not(.recent) .dest-export { background: var(--surface-strong); color: var(--text); }
 .dest:not(.recent) .dest-export:hover:not(:disabled) { background: var(--accent); color: var(--accent-ink); }
 .dest.running .dest-export { background: var(--accent-soft); color: var(--accent); opacity: 1; }
+.running-button .run-cancel { display: none; }
+.running-button:hover .run-cancel { display: inline; }
+.running-button:hover .run-time { display: none; }
+.dest .running-button:hover:not(:disabled), .canvas-card .running-button:hover:not(:disabled) { background: var(--err); color: #fff; }
 /* Flex-centred icon: a text "×" sits off-centre in most fonts. */
 .dest-remove { position: absolute; right: -3px; top: -5px; display: -webkit-inline-box; display: inline-flex; -webkit-box-align: center; align-items: center; -webkit-box-pack: center; justify-content: center;
   height: 20px; min-width: 20px; padding: 0; border-radius: 10px; font-size: 11px; line-height: 1; color: var(--muted); background: var(--bg); border: 1px solid var(--border-strong); opacity: 0; }
@@ -222,6 +226,8 @@ strong.size-value { color: var(--text); font-weight: 600; }
 .status-text strong { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .status-text span { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .statusbar .ghost-button { margin-left: 4px; }
+.statusbar #cancelJob { border: 1px solid var(--border-strong); color: var(--text); }
+.statusbar #cancelJob:hover { border-color: var(--err); background: var(--err); color: #fff; }
 .statusbar[data-kind="idle"] .status-icon { background: var(--surface-strong); }
 .statusbar[data-kind="idle"] .status-icon:after { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--faint); vertical-align: 1px; }
 .statusbar[data-kind="ready"] .status-icon { background: var(--surface-strong); }

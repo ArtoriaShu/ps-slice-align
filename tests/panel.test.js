@@ -204,3 +204,15 @@ test('cancelling before Photoshop answers ends the job, and a late reply cannot 
   p.exportButton().fire('click');
   await until(() => fs.readdirSync(p.out).length === 1);
 });
+
+test('the clicked directory button turns into a cancel button while exporting', async t => {
+  const p = boot(t);
+  await until(() => p.exportButton() && !p.exportButton().disabled);
+  p.slowNextDescribe(); p.exportButton().fire('click');
+  const running = p.exportButton();
+  assert.equal(running.disabled, false); assert.match(running.className, /running-button/);
+  assert.match(p.nodes.statusDetail.textContent, /可随时取消/);
+  running.fire('click');
+  await until(() => /已取消/.test(p.nodes.statusTitle.textContent), 500);
+  await wait(400); assert.deepEqual(fs.readdirSync(p.out), []);
+});
