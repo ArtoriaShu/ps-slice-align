@@ -76,7 +76,7 @@
     var meta = current;
     if (trackerError) { setStatus('warn', trackerError, '切图需要在 Photoshop 中选中一个图层、图层组或画板；整图导出不受影响。'); return; }
     if (!meta) { setStatus('idle', '正在读取 Photoshop…', ''); return; }
-    if (!S.directories.length) { setStatus('warn', '还没有切图目录', '在右侧“添加目录”后即可导出。'); return; }
+    if (!S.directories.length) { setStatus('warn', '还没有切图目录', '在左侧“添加目录”后即可导出。'); return; }
     var nm = namer.state();
     if (nm.edited && !M.naming.normalize(nm.value)) { setStatus('warn', '请填写导出名称', '或点击“用图层名”。'); return; }
     var dir = recentDirectory();
