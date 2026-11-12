@@ -26,7 +26,7 @@
   function selMeta() {
     if (!ps.docOpen) { return {ok: false, message: '请打开 PSD 并选择一个导出对象。'}; }
     var l = layer();
-    return {ok: true, token: [1, l.id, 1].join('|'), docId: 1, id: l.id, name: l.name, kind: l.kind, revision: String(ps.revision)};
+    return {ok: true, token: [1, l.id, 1].join('|'), docId: 1, id: l.id, name: l.name, kind: l.kind, revision: String(ps.revision), estWidth: l.w, estHeight: l.h};
   }
   function docMeta() {
     if (!ps.docOpen) { return {ok: false, message: '请先打开需要导出的 PSD。'}; }
@@ -42,7 +42,7 @@
     removeEventListener: function () {}, dispatchEvent: function () {}, resizeContent: function () {},
     evalScript: function (script, cb) {
       var r, args = [];
-      var m = /^Align4\.(\w+)\((.*)\)$/.exec(script);
+      var m = /^Align4(?:v2)?\.(\w+)\((.*)\)$/.exec(script);
       if (m && m[2]) { try { args = JSON.parse('[' + m[2] + ']'); } catch (e) {} }
       switch (m && m[1]) {
         case 'describeSelection': case 'selectionToken': r = selMeta(); break;

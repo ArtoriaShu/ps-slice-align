@@ -1,5 +1,7 @@
 ﻿/* Native selected-object PNG export. No temporary Photoshop documents. */
-var Align4 = (function () {
+// Versioned global: 1.x panels define `Align4` in the same Photoshop script engine,
+// so 2.x uses its own name and both can be installed side by side.
+var Align4v2 = (function () {
     function sid(s) { return stringIDToTypeID(s); }
     function quote(s) { return '"' + String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\x00-\x1f\u2028\u2029]/g, function (c) { return '\\u' + ('0000' + c.charCodeAt(0).toString(16)).slice(-4); }) + '"'; }
     function json(v) {
@@ -40,10 +42,22 @@ var Align4 = (function () {
         } catch (e) {}
         return null;
     }
+    function number(desc, key) { try { return desc.getUnitDoubleValue(sid(key)); } catch (e) { return desc.getDouble(sid(key)); } }
+    // Approximate size from the layer bounds (or artboard rectangle): instant, no Generator.
+    // The exact size still comes from the exported PNG.
+    function estimate(result) {
+        try {
+            var rect = result.kind === '画板' ? property('artboard').getObjectValue(sid('artboard')).getObjectValue(sid('artboardRect'))
+                                              : property('bounds').getObjectValue(sid('bounds'));
+            var w = Math.round(number(rect, 'right') - number(rect, 'left')), h = Math.round(number(rect, 'bottom') - number(rect, 'top'));
+            if (w > 0 && h > 0) { result.estWidth = w; result.estHeight = h; }
+        } catch (e) {}
+    }
     function meta() {
         var result = token(); result.name = property('name').getString(sid('name'));
         result.kind = property('layerSection').getEnumerationValue(sid('layerSection')) === sid('layerSectionStart') ? '图层组' : '图层';
         try { var a = property('artboardEnabled'); if (a.hasKey(sid('artboardEnabled')) && a.getBoolean(sid('artboardEnabled'))) { result.kind = '画板'; } } catch (e) {}
+        estimate(result);
         result.revision = revision(); result.ok = true; return result;
     }
     function selectionToken() { try { var t = token(); t.ok = true; return json(t); } catch (e) { return error(e); } }

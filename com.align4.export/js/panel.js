@@ -51,7 +51,8 @@
       if (!closing) { callback(r); }
     }
     try {
-      bridge.evalScript(script, function (raw) {
+      // Modules write "Align4.x()"; the 2.x host object is Align4v2 (see host.jsx).
+      bridge.evalScript(script.replace(/^Align4\./, 'Align4v2.'), function (raw) {
         var r; try { r = JSON.parse(raw); } catch (e) { r = {ok: false, message: '宿主脚本连接失败（' + String(raw).slice(0, 80) + '），请重启 Photoshop。'}; }
         deliver(r);
       });
@@ -198,16 +199,18 @@
       return;
     }
     setText(el.objectKind, meta.kind); setText(el.objectName, meta.name); el.objectName.title = meta.name;
-    var source = m && (m.revision == null || m.revision === meta.revision) ? m : null;
+    var exact = m && (m.revision == null || m.revision === meta.revision) ? m : null;
+    var source = exact || (meta.estWidth ? {width: meta.estWidth, height: meta.estHeight} : null), approx = !exact && !!source, about = approx ? '约 ' : '';
     var hint = '', warn = false;
     var locked = S.sizeLocked && (min.width || min.height);
     if (source) {
-      setText(el.sizeSource, source.width + ' × ' + source.height);
+      setText(el.sizeSource, about + source.width + ' × ' + source.height);
       var tw = M.rules.ceil4(Math.max(source.width, min.width)), th = M.rules.ceil4(Math.max(source.height, min.height));
-      setText(el.sizeTarget, tw + ' × ' + th);
+      setText(el.sizeTarget, about + tw + ' × ' + th);
       var p = M.rules.padding(tw, th, source.width, source.height, S.anchor);
-      hint = (tw === source.width && th === source.height) ? '已经是 4 的倍数，不需要补边。' :
-        '透明补边：左 ' + p.left + ' · 右 ' + p.right + ' · 上 ' + p.top + ' · 下 ' + p.bottom + ' px（按上次导出时的实际尺寸估算）';
+      hint = approx ? '按图层范围估算；导出时以 Photoshop 实际生成的 PNG 为准。' :
+        (tw === source.width && th === source.height) ? '已经是 4 的倍数，不需要补边。' :
+        '透明补边：左 ' + p.left + ' · 右 ' + p.right + ' · 上 ' + p.top + ' · 下 ' + p.bottom + ' px（按上次导出的实际尺寸）';
       if (locked && oversize(source, min)) { hint = '图像比固定尺寸大，这张会按图像尺寸补齐到 ' + tw + ' × ' + th + '，不会缩小。'; warn = true; }
     } else {
       setText(el.sizeSource, '导出时读取');

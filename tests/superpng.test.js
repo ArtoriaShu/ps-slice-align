@@ -94,7 +94,7 @@ function photoshop(fail){
       if(fail)throw Error('SuperPNG unavailable');created.add(desc.values['In  '][0].name);
     }});
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../com.align4.export/host/host.jsx'),'utf8'),context);
-  return {app,original,descriptors,created,closed:()=>closed,convert:()=>JSON.parse(context.Align4.convertSuperPNG('input.png','output.png'))};
+  return {app,original,descriptors,created,closed:()=>closed,convert:()=>JSON.parse(context.Align4v2.convertSuperPNG('input.png','output.png'))};
 }
 
 test('host uses exact SuperPNG settings and restores the original PSD and dialogs',()=>{

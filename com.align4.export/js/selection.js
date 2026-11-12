@@ -10,7 +10,7 @@ exports.create = function (o) {
   var timer = null, pollTimer = null, running = false, again = false, paused = 0, stopped = false;
   var last = null, lastError = null, delay = interval;
 
-  function key(meta) { return [meta.token, meta.name, meta.kind, meta.revision, meta.width, meta.height].join('\u0001'); }
+  function key(meta) { return [meta.token, meta.name, meta.kind, meta.revision, meta.width, meta.height, meta.estWidth, meta.estHeight].join('\u0001'); }
 
   function check() {
     if (stopped || paused || running) { if (running) { again = true; } return; }

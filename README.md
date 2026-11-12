@@ -49,5 +49,6 @@ Photoshop 切图导出插件，自动将 PNG 宽高向上补齐至 4 的倍数�
 ## 开发
 
 - 运行测试：`node --test tests/`
+- 打包：`python3 tools/build-package.py`（正式版）、`python3 tools/build-package.py --beta`（测试版：独立的插件 ID 和安装目录，可与正式版同时安装），输出到 `dist/`。
 - 浏览器预览（模拟 Photoshop，可点击试用全部界面）：在仓库根目录运行 `python -m http.server 8000`，然后打开 <http://localhost:8000/dev/preview.html>。
 - 代码结构：`js/panel.js` 只负责界面；导出流程在 `js/export-job.js`，等待 Generator 与自动重发在 `js/native-export.js`，名称归属在 `js/naming.js`，选择跟踪在 `js/selection.js`，设置在 `js/settings.js`，日志在 `js/logger.js` 与 `js/diagnostics.js`。

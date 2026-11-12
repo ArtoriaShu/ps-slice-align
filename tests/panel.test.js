@@ -55,6 +55,8 @@ function boot(t, opts = {}) {
       getSystemPath: () => ROOT, getHostEnvironment: () => JSON.stringify({appId: 'PHXS', appVersion: '21.2', appSkinInfo: {panelBackgroundColor: {color: {red: 50, green: 50, blue: 50}}}}),
       addEventListener() {}, removeEventListener() {}, dispatchEvent() {}, resizeContent() {},
       evalScript(script, cb) {
+        assert.match(script, /^Align4v2\./, 'the panel talks to the 2.x host object');
+        script = script.replace(/^Align4v2\./, 'Align4.');
         scripts.push(script);
         const reply = v => setTimeout(() => cb(JSON.stringify(v)), p0.slowNext && /describeSelection/.test(script) && !(p0.slowNext = false) ? 200 : 1);
         if (script === 'Align4.describeSelection()' || script === 'Align4.selectionToken()') return reply(selected.fail ? {ok: false, message: '每次只选择一个图层、图层组或画板。'} : Object.assign({ok: true}, selected));
@@ -272,4 +274,16 @@ test('without translation the file field mirrors the name and is read-only', asy
   assert.equal(p.nodes.englishName.value, '按钮'); assert.equal(p.nodes.englishName.readOnly, true);
   assert.equal(p.nodes.filePrefix.textContent, 'ui_'); assert.equal(p.nodes.fileName.textContent, 'ui_按钮.png');
   assert.equal(p.nodes.translateNote.hidden, true);
+});
+
+test('an approximate size from the layer bounds shows on selection; the exact size replaces it after export', async t => {
+  const p = boot(t);
+  p.select({token: '1|5|1', name: '按钮', kind: '图层', revision: '3', estWidth: 6, estHeight: 3});
+  await until(() => p.nodes.sizeSource.textContent === '约 6 × 3');
+  assert.equal(p.nodes.sizeTarget.textContent, '约 8 × 4');
+  assert.match(p.nodes.objectHint.textContent, /估算/);
+  await until(() => p.exportButton() && !p.exportButton().disabled);
+  p.exportButton().fire('click');
+  await until(() => p.nodes.sizeSource.textContent === '5 × 3', 3000);
+  assert.equal(p.nodes.sizeTarget.textContent, '8 × 4');
 });
