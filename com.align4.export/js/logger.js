@@ -50,9 +50,13 @@ exports.create = function (o) {
     } catch (ignore) {}
   }
 
+  var prunedDay = null;
   function write(entry) {
     if (!o.dir || !o.fs) { return; }
     ensure();
+    // Photoshop often stays open for days: drop old logs again whenever the date changes.
+    var today = day(new Date(entry.time));
+    if (prunedDay === null) { prunedDay = today; } else if (today !== prunedDay) { prunedDay = today; prune(); }
     try { o.fs.appendFileSync(file(entry.time), exports.format(entry, true) + '\n', 'utf8'); writeError = null; }
     catch (e) { writeError = String(e.message || e); }
   }

@@ -86,7 +86,7 @@
   }
 
   // ---------- Translation ----------
-  var translator = null, translatorError = null, userCache = {mtime: -1, map: {}};
+  var translator = null, translatorError = null, userCache = {mtime: -1, map: {}, checked: 0}, memo = {map: null, results: {}};
   function userGlossaryPath() { return M.path.join(M.env.APPDATA || M.os.tmpdir(), 'Align4Export', '我的术语表.csv'); }
   // Excel on Chinese Windows often saves CSV as GBK unless "CSV UTF-8" is chosen.
   function decodeText(buffer) {
@@ -95,11 +95,15 @@
     return text;
   }
   function userGlossary() {
+    // Rendering asks many times per keystroke: look at the file at most once a second.
+    // The same map object is kept while nothing changed, so translations stay cached.
+    if (userCache.checked && now() - userCache.checked < 1000) { return userCache.map; }
     var p = userGlossaryPath();
     try {
       var st = M.fs.statSync(p);
       if (st.mtimeMs !== userCache.mtime) { userCache = {mtime: st.mtimeMs, map: M.translate.loadGlossary(decodeText(M.fs.readFileSync(p)))}; }
-    } catch (e) { userCache = {mtime: -1, map: {}}; }
+    } catch (e) { if (userCache.mtime !== -1) { userCache = {mtime: -1, map: {}}; } }
+    userCache.checked = now();
     return userCache.map;
   }
   function getTranslator() {
@@ -117,21 +121,43 @@
   function autoEnglish(zh) {
     if (!S.translate || !zh) { return null; }
     if (!CJK.test(zh)) { return {text: zh, parts: [{src: zh, out: zh, source: 'ascii'}]}; }
-    var t = getTranslator(); return t ? t.translate(zh) : null;
+    return cachedTranslate(zh);
+  }
+  // Same name + same glossary -> same result; a changed glossary file starts a new cache.
+  function cachedTranslate(zh) {
+    var t = getTranslator(); if (!t) { return null; }
+    var map = userGlossary();
+    if (memo.map !== map) { memo = {map: map, results: {}, size: 0}; }
+    if (!Object.prototype.hasOwnProperty.call(memo.results, zh)) {
+      if (memo.size > 500) { memo = {map: map, results: {}, size: 0}; }
+      memo.results[zh] = t.translate(zh); memo.size++;
+    }
+    return memo.results[zh];
   }
   function translateName(name) { var a = autoEnglish(name); return a ? a.text : name; }
   // The user's English for the current Chinese name (from the "改" row), if any.
   var englishOverride = null; // {source, value}
-  function finalName(zh) {
-    if (!S.translate) { return zh; }
-    if (englishOverride && englishOverride.source === zh && englishOverride.value.trim()) { return englishOverride.value.trim(); }
-    return translateName(zh);
+  // Typed English follows the same rule as the glossary ("confirm button" -> confirm_button),
+  // so the first export and every later one produce the same file name.
+  function cleanOverride(v) { return M.translate.cleanEnglish(v); }
+  // naming: the snapshot taken when export was clicked (defaults to the live state).
+  function namingSnapshot() {
+    return {translate: S.translate, prefix: S.prefix, override: englishOverride ? {source: englishOverride.source, value: englishOverride.value} : null};
   }
+  function finalName(zh, naming) {
+    naming = naming || namingSnapshot();
+    if (!naming.translate) { return zh; }
+    var o = naming.override;
+    if (o && o.source === zh && cleanOverride(o.value)) { return cleanOverride(o.value); }
+    var a = CJK.test(zh) ? cachedTranslate(zh) : null;
+    return a ? a.text : zh;
+  }
+  function process_id() { return now().toString(36) + Math.floor(Math.random() * 1e6).toString(36); }
   function ensureUserGlossary() {
     var p = userGlossaryPath();
     if (M.fs.existsSync(p)) { return p; }
     (function make(dir) { if (!M.fs.existsSync(dir)) { make(M.path.dirname(dir)); M.fs.mkdirSync(dir); } }(M.path.dirname(p)));
-    M.fs.writeFileSync(p, '\ufeff' + ['中文,英文,备注', '# 我的术语表：优先于内置术语表。英文填 - 表示去掉这个词。导出前改过的译法会自动记到这里。,,',
+    M.fs.writeFileSync(p, '\ufeff' + ['中文,英文,备注', '# 我的术语表：同一个词优先于内置术语表。英文填 - 表示去掉这个词。导出前改过的译法会自动记到这里。,,',
       '# 用 Excel 编辑后请另存为“CSV UTF-8”。,,'].join('\r\n') + '\r\n', 'utf8');
     return p;
   }
@@ -149,8 +175,13 @@
       }
     });
     if (changed) {
-      M.fs.writeFileSync(p, '\ufeff' + rows.filter(function (r) { return r.length && r.join('') !== ''; }).map(M.translate.csvLine).join('\r\n') + '\r\n', 'utf8');
-      userCache.mtime = -1;
+      // Write a complete copy first, then swap it in, so a failure never leaves a half-written glossary.
+      var tmp = p + '.' + process_id() + '.tmp';
+      try {
+        M.fs.writeFileSync(tmp, '\ufeff' + rows.filter(function (r) { return r.length && r.join('') !== ''; }).map(M.translate.csvLine).join('\r\n') + '\r\n', 'utf8');
+        M.fs.renameSync(tmp, p);
+      } catch (e) { try { M.fs.unlinkSync(tmp); } catch (ignore) {} throw e; }
+      userCache = {mtime: -1, map: {}, checked: 0};
     }
     return changed;
   }
@@ -221,6 +252,12 @@
     setText(el.objectHint, hint); el.objectHint.title = hint; el.objectHint.className = 'hint' + (warn ? ' warn' : '');
   }
 
+  // The part of the final file name after the prefix, exactly as it will be written.
+  function writtenMiddle(name) {
+    var prefix = el.prefix.value, cleanPrefix = M.outputFiles.baseName(prefix + 'x').slice(0, -1), written = M.outputFiles.nameFor(prefix, name);
+    if (!prefix) { return written; }
+    return cleanPrefix && written.indexOf(cleanPrefix) === 0 ? written.slice(cleanPrefix.length) : name;
+  }
   function renderNaming() {
     var nm = namer.state();
     // While typing, nm.value already equals the field, so this only fires for
@@ -239,6 +276,8 @@
     setText(el.filePrefix, el.prefix.value); el.filePrefix.hidden = !el.prefix.value;
     el.englishName.readOnly = !S.translate || !current; el.englishName.disabled = !!job;
     el.englishName.placeholder = !current ? '—' : '';
+    // Outside editing, show the name exactly as it will be written (illegal characters replaced, length capped).
+    if (shown && current) { shown = writtenMiddle(shown); }
     if (!editing && el.englishName.value !== shown) { el.englishName.value = shown; }
     el.englishReset.hidden = !englishOverride; el.englishReset.disabled = !!job;
     fitFileInput();
@@ -288,63 +327,94 @@
     }
   }
 
-  function renderDirectories() {
-    // The list is rebuilt on every refresh (selection changes, every 0.5s while
-    // exporting): keep its scroll position and any name being edited.
-    var scroll = el.directoryList.scrollTop, active = document.activeElement, editing = null;
-    if (active && active.className === 'dest-name' && active.getAttribute) {
-      editing = {id: active.getAttribute('data-id'), value: active.value, start: active.selectionStart, end: active.selectionEnd};
+  // Directory rows are created once per directory and then only updated in place.
+  // Rebuilding them would swallow clicks: pressing "导出" blurs the name field,
+  // the blur re-renders, and if the pressed button were replaced the mouseup
+  // would land on a new node and no click would fire.
+  var REMOVE_SVG = '<svg viewBox="0 0 10 10" width="8" height="8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7"/></svg>';
+  var rows = {}, emptyDest = null;
+  function directoryById(id) { var hit = null; S.directories.forEach(function (d) { if (d.id === id) { hit = d; } }); return hit; }
+  function createRow(id) {
+    var r = {row: make('div', 'dest'), icon: make('span', 'dest-icon'), main: make('div', 'dest-main'), name: make('input', 'dest-name'),
+      path: make('p', 'dest-path'), last: make('p', 'dest-last'), btn: make('button', 'dest-export'), remove: make('button', 'dest-remove'), mode: null};
+    r.icon.innerHTML = FOLDER_SVG;
+    r.name.type = 'text'; r.name.setAttribute('data-id', id); r.name.title = '点击修改显示名称'; r.name.setAttribute('aria-label', '目录名称');
+    r.name.addEventListener('change', function () { var d = directoryById(id); if (!d) { return; } d.name = r.name.value.trim() || M.settings.basename(d.path); r.name.value = d.name; persist(); });
+    r.name.addEventListener('keydown', function (e) { if (e.keyCode === 13) { r.name.blur(); } });
+    r.path.addEventListener('click', function () { var d = directoryById(id); if (d && directoryExists(d.path)) { openFolder(d.path); } });
+    r.btn.addEventListener('click', function () {
+      var d = directoryById(id); if (!d) { return; }
+      if (job && job.target.id === id) { cancelCurrent(); } else if (!r.btn.disabled) { exportTo(d); }
+    });
+    r.remove.addEventListener('click', function () { var d = directoryById(id); if (d) { removeDirectory(d); } });
+    r.main.appendChild(r.name); r.main.appendChild(r.path); r.main.appendChild(r.last);
+    r.row.appendChild(r.icon); r.row.appendChild(r.main); r.row.appendChild(r.btn); r.row.appendChild(r.remove);
+    return r;
+  }
+  function updateRow(r, d, recent, blocked, cannot) {
+    var running = !!job && job.target.id === d.id, exists = knownDirectory(d.path);
+    var cls = 'dest' + (d === recent ? ' recent' : '') + (running ? ' running' : '') + (exists ? '' : ' missing');
+    if (r.row.className !== cls) { r.row.className = cls; }
+    if (document.activeElement !== r.name && r.name.value !== d.name) { r.name.value = d.name; }
+    r.name.disabled = blocked;
+    setText(r.path, exists ? d.path : '目录不存在：' + d.path);
+    r.path.className = 'dest-path' + (exists ? ' openable' : '');
+    r.path.title = exists ? '点击打开：' + d.path : d.path;
+    r.last.hidden = !d.lastExport;
+    if (d.lastExport) { r.last.className = 'dest-last ' + (d.lastExport.ok ? 'ok' : 'error'); setText(r.last, lastText(d.lastExport)); r.last.title = r.last.textContent; }
+    if (running) { if (r.mode !== 'running') { r.mode = 'running'; runningButton(r.btn); } }
+    else {
+      if (r.mode !== 'idle') { r.mode = 'idle'; clear(r.btn); r.btn.className = 'dest-export'; setText(r.btn, '导出'); }
+      r.btn.disabled = blocked || !!cannot || !exists;
+      r.btn.title = !exists ? '目录不存在，请移除后重新添加' : cannot || ('导出到 ' + d.path);
     }
-    clear(el.directoryList);
+    var confirm = pendingRemove === d.id;
+    if (r.removeMode !== confirm) {
+      r.removeMode = confirm;
+      r.remove.className = 'dest-remove' + (confirm ? ' confirm' : '');
+      if (confirm) { clear(r.remove); setText(r.remove, '确认移除'); } else { r.remove.textContent = ''; r.remove.innerHTML = REMOVE_SVG; }
+    }
+    r.remove.title = '从列表中移除（不会删除文件夹）'; r.remove.disabled = blocked; r.remove.setAttribute('aria-label', '移除目录 ' + d.name);
+  }
+  function renderDirectories() {
+    var scroll = el.directoryList.scrollTop;
     setText(el.directoryCount, S.directories.length);
     var recent = recentDirectory(), blocked = !!job || choosingFolder;
-    var nm = namer.state();
     var cannot = !current ? '没有可导出的对象' : !minSize().ok ? '输出尺寸无效' : '';
     if (!S.directories.length) {
-      var empty = make('div', 'empty-dest');
-      empty.appendChild(make('p', null, '添加常用的切图目录，每个目录都有自己的导出按钮，点一下就导出到那里。'));
-      var add = make('button', 'primary-button', '＋ 添加第一个目录');
-      add.addEventListener('click', addDirectory); add.disabled = blocked;
-      empty.appendChild(add); el.directoryList.appendChild(empty);
+      if (!emptyDest || emptyDest.node.parentNode !== el.directoryList) {
+        clear(el.directoryList); rows = {};
+        var empty = make('div', 'empty-dest');
+        empty.appendChild(make('p', null, '添加常用的切图目录，每个目录都有自己的导出按钮，点一下就导出到那里。'));
+        var add = make('button', 'primary-button', '＋ 添加第一个目录');
+        add.addEventListener('click', addDirectory);
+        empty.appendChild(add); el.directoryList.appendChild(empty);
+        emptyDest = {node: empty, add: add};
+      }
+      emptyDest.add.disabled = blocked;
       return;
     }
-    S.directories.forEach(function (d) {
-      var running = job && job.target.id === d.id, exists = directoryExists(d.path);
-      var row = make('div', 'dest' + (d === recent ? ' recent' : '') + (running ? ' running' : '') + (exists ? '' : ' missing'));
-      var icon = make('span', 'dest-icon'); icon.innerHTML = FOLDER_SVG;
-      var main = make('div', 'dest-main');
-      var name = make('input', 'dest-name'); name.type = 'text'; name.value = d.name; name.setAttribute('data-id', d.id); name.title = '点击修改显示名称'; name.disabled = blocked; name.setAttribute('aria-label', '目录名称');
-      name.addEventListener('change', function () { d.name = name.value.trim() || M.settings.basename(d.path); name.value = d.name; persist(); });
-      name.addEventListener('keydown', function (e) { if (e.keyCode === 13) { name.blur(); } });
-      var path = make('p', 'dest-path' + (exists ? ' openable' : ''), exists ? d.path : '目录不存在：' + d.path);
-      path.title = exists ? '点击打开：' + d.path : d.path;
-      if (exists) { path.addEventListener('click', function () { openFolder(d.path); }); }
-      main.appendChild(name); main.appendChild(path);
-      if (d.lastExport) { var last = make('p', 'dest-last ' + (d.lastExport.ok ? 'ok' : 'error'), lastText(d.lastExport)); last.title = last.textContent; main.appendChild(last); }
-      var btn = make('button', 'dest-export');
-      if (running) { runningButton(btn); }
-      else {
-        btn.textContent = '导出';
-        btn.disabled = blocked || !!cannot || !exists;
-        btn.title = !exists ? '目录不存在，请移除后重新添加' : cannot || ('导出到 ' + d.path);
+    if (emptyDest) { if (emptyDest.node.parentNode === el.directoryList) { el.directoryList.removeChild(emptyDest.node); } emptyDest = null; }
+    var keep = {};
+    S.directories.forEach(function (d, i) {
+      var r = rows[d.id] || (rows[d.id] = createRow(d.id));
+      keep[d.id] = true;
+      updateRow(r, d, recent, blocked, cannot);
+      // Only touch the DOM order when it is actually wrong.
+      if (el.directoryList.children ? el.directoryList.children[i] !== r.row : true) {
+        if (r.row.parentNode === el.directoryList) { el.directoryList.removeChild(r.row); }
+        var ref = el.directoryList.children ? el.directoryList.children[i] : null;
+        if (ref && el.directoryList.insertBefore) { el.directoryList.insertBefore(r.row, ref); } else { el.directoryList.appendChild(r.row); }
       }
-      btn.addEventListener('click', function () { if (running) { cancelCurrent(); } else { exportTo(d); } });
-      var remove = make('button', 'dest-remove' + (pendingRemove === d.id ? ' confirm' : ''), pendingRemove === d.id ? '确认移除' : null);
-      if (pendingRemove !== d.id) { remove.innerHTML = '<svg viewBox="0 0 10 10" width="8" height="8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7"/></svg>'; }
-      remove.title = '从列表中移除（不会删除文件夹）'; remove.disabled = blocked; remove.setAttribute('aria-label', '移除目录 ' + d.name);
-      remove.addEventListener('click', function () { removeDirectory(d); });
-      row.appendChild(icon); row.appendChild(main); row.appendChild(btn); row.appendChild(remove);
-      el.directoryList.appendChild(row);
-      if (editing && editing.id === d.id && !name.disabled) {
-        name.value = editing.value; name.focus();
-        try { name.setSelectionRange(editing.start, editing.end); } catch (e) {}
-      }
+    });
+    Object.keys(rows).forEach(function (id) {
+      if (!keep[id]) { if (rows[id].row.parentNode === el.directoryList) { el.directoryList.removeChild(rows[id].row); } delete rows[id]; }
     });
     el.directoryList.scrollTop = scroll;
   }
 
   function renderCanvas() {
-    var dir = S.canvasDirectory, exists = !!dir && directoryExists(dir), running = !!job && job.target.id === 'canvas', blocked = !!job || choosingFolder;
+    var dir = S.canvasDirectory, exists = !!dir && knownDirectory(dir), running = !!job && job.target.id === 'canvas', blocked = !!job || choosingFolder;
     if (canvasCard) { canvasCard.className = 'canvas-card' + (dir ? '' : ' unset') + (running ? ' running' : ''); }
     if (!el.canvasIcon.innerHTML) { el.canvasIcon.innerHTML = CANVAS_SVG; }
     setText(el.canvasDirName, dir ? M.settings.basename(dir) : '未选择目录');
@@ -365,13 +435,32 @@
     }
   }
 
+  // Directory checks. Clicks check synchronously (the user is waiting for that answer anyway);
+  // rendering only reads the cache and refreshes it in the background, so a slow or
+  // disconnected network drive never stalls typing or selection updates.
   var existsCache = {};
+  function invalidateDirectories() { Object.keys(existsCache).forEach(function (k) { existsCache[k].t = 0; }); }
   function directoryExists(p) {
+    if (!M.fs) { return true; }
+    var v = false; try { v = M.fs.existsSync(p) && M.fs.statSync(p).isDirectory(); } catch (e) {}
+    existsCache[p] = {t: now(), v: v}; return v;
+  }
+  function knownDirectory(p) {
     if (!M.fs) { return true; }
     var c = existsCache[p];
     if (c && now() - c.t < 5000) { return c.v; }
-    var v = false; try { v = M.fs.existsSync(p) && M.fs.statSync(p).isDirectory(); } catch (e) {}
-    existsCache[p] = {t: now(), v: v}; return v;
+    if (typeof M.fs.stat !== 'function') { return directoryExists(p); }
+    if (!c) { c = existsCache[p] = {t: 0, v: true}; } // unknown: assume usable until the check answers
+    if (!c.checking) {
+      c.checking = true;
+      M.fs.stat(p, function (error, st) {
+        var v = !error && st.isDirectory(), changed = v !== c.v;
+        c.checking = false; c.v = v; c.t = now();
+        if (existsCache[p] !== c) { existsCache[p] = c; }
+        if (changed && M && !closing) { renderDirectories(); renderCanvas(); }
+      });
+    }
+    return c.v;
   }
 
   function renderControls() {
@@ -397,13 +486,18 @@
   }
 
   // ---------- Selection tracking ----------
+  // Unfixed sizes belong to the object they were typed for (fixed ones apply to every export).
+  var sizeOwner = null;
+  function clearUnfixedSize() {
+    if (S.sizeLocked || !(el.minWidth.value || el.minHeight.value)) { return false; }
+    el.minWidth.value = ''; el.minHeight.value = ''; S.minWidth = ''; S.minHeight = ''; sizeOwner = null; persist();
+    return true;
+  }
   function onSelection(meta) {
     var previous = current;
     current = meta; trackerError = null;
+    if (!S.sizeLocked && sizeOwner !== meta.token) { clearUnfixedSize(); }
     if (!previous || previous.token !== meta.token) {
-      if (previous && !S.sizeLocked && (el.minWidth.value || el.minHeight.value)) {
-        el.minWidth.value = ''; el.minHeight.value = ''; S.minWidth = ''; S.minHeight = ''; persist();
-      }
       logger.info('selection', '选中 ' + meta.kind + '「' + meta.name + '」', {token: meta.token, revision: meta.revision});
     }
     if (meta.estMs) { logger.warn('estimate', '读取图层范围用时 ' + meta.estMs + 'ms，为避免卡顿，此文档不再显示估算尺寸'); }
@@ -421,42 +515,48 @@
   // ---------- Export ----------
   // target: {id, label, path, superPNG, setLast(entry)}
   function startJob(scope, target, details) {
-    job = {id: ++jobSeq, target: target, scope: scope, started: now(), stage: 'prepare', attempts: 1, handle: null};
+    job = {id: ++jobSeq, target: target, scope: scope, started: now(), stage: 'prepare', attempts: 1, handle: null, edits: editCount};
     pendingRemove = null; tracker.pause();
     logger.info('export.start', '开始' + (scope === 'canvas' ? '整图' : '切图') + '导出 → ' + target.label, details, job.id);
     showJobStatus();
     return job;
   }
-  function runPipeline(meta, name, min) {
+  function runPipeline(meta, name, min, prefix) {
     var mine = job, t = mine.target;
     job.handle = M.exportJob.run({fs: M.fs, path: M.path, os: M.os, png: M.png, rules: M.rules, outputFiles: M.outputFiles, nativeExport: M.nativeExport, superPNG: M.superPNG,
       host: host, now: now, setTimeout: function (fn, ms) { return window.setTimeout(fn, ms); }, clearTimeout: function (h) { window.clearTimeout(h); }, log: logger, job: job.id}, {
-      scope: job.scope, meta: meta, name: name, prefix: S.prefix, directory: t.path, minWidth: min.width, minHeight: min.height, anchor: S.anchor, superPNG: t.superPNG,
+      scope: job.scope, meta: meta, name: name, prefix: prefix, directory: t.path, minWidth: min.width, minHeight: min.height, anchor: S.anchor, superPNG: t.superPNG,
+      editsAtStart: mine.edits, edits: function () { return editCount; },
       onStage: function (stage, detail) { if (!job) { return; } job.stage = stage; if (detail && detail.attempts) { job.attempts = detail.attempts; } showJobStatus(); }
     }, function (error, record) { end(mine, error, record, meta); });
   }
 
   function exportTo(d) {
     if (job || closing) { return; }
-    if (!directoryExists(d.path)) { existsCache = {}; setStatus('error', '目录不存在', d.path); render(); return; }
+    if (!directoryExists(d.path)) { invalidateDirectories(); setStatus('error', '目录不存在', d.path); render(); return; }
     var min = minSize();
     if (!min.ok) { setStatus('error', '输出尺寸无效', '宽高需为 1–30000 的整数，或留空自动补齐。'); return; }
+    // Everything that decides the file name is fixed at the click; later changes apply to the next export.
+    var naming = namingSnapshot(), owner = sizeOwner;
     var mine = startJob('selection', {id: d.id, label: d.name, path: d.path, superPNG: S.superPNG, setLast: function (le) { d.lastExport = le; }},
-      {directory: d.path, prefix: S.prefix, typedName: el.exportName.value, minWidth: min.width, minHeight: min.height, sizeLocked: S.sizeLocked, anchor: S.anchor, superPNG: S.superPNG});
+      {directory: d.path, prefix: naming.prefix, typedName: el.exportName.value, minWidth: min.width, minHeight: min.height, sizeLocked: S.sizeLocked, anchor: S.anchor, superPNG: S.superPNG, translate: naming.translate});
     mine.locked = S.sizeLocked; mine.min = min;
     host('Align4.describeSelection()', function (meta) {
       if (job !== mine) { return; } // cancelled meanwhile
       if (!meta.ok) { end(mine, new Error(meta.message)); return; }
+      if (!mine.locked && (min.width || min.height) && owner !== meta.token) {
+        end(mine, new Error('输出尺寸是为上一个对象填写的，当前选中的是另一个对象。请确认尺寸后重新导出。')); return;
+      }
       current = meta;
       namer.resolve(meta, function (error, name, custom) {
         if (job !== mine) { return; }
         if (error) { end(mine, error); return; }
-        var english = finalName(name);
-        mine.naming = {source: name, name: english, override: !!(S.translate && englishOverride && englishOverride.source === name)};
+        var english = finalName(name, naming);
+        mine.naming = {source: name, name: english, override: !!(naming.translate && naming.override && naming.override.source === name)};
         if (english !== name) { logger.info('translate', '「' + name + '」→ ' + english + (mine.naming.override ? '（手动修改）' : ''), undefined, mine.id); }
         name = english;
-        logger.info('export.object', meta.kind + '「' + meta.name + '」，文件名 ' + M.outputFiles.nameFor(S.prefix, name) + '.png' + (custom ? '（自定义）' : ''), {token: meta.token, revision: meta.revision}, job.id);
-        runPipeline(meta, name, min);
+        logger.info('export.object', meta.kind + '「' + meta.name + '」，文件名 ' + M.outputFiles.nameFor(naming.prefix, name) + '.png' + (custom ? '（自定义）' : ''), {token: meta.token, revision: meta.revision}, job.id);
+        runPipeline(meta, name, min, naming.prefix);
       });
     });
   }
@@ -465,15 +565,16 @@
     if (job || closing) { return; }
     var dir = S.canvasDirectory;
     if (!dir) { chooseCanvasFolder(); return; }
-    if (!directoryExists(dir)) { existsCache = {}; setStatus('error', '整图目录不存在', dir); render(); return; }
+    if (!directoryExists(dir)) { invalidateDirectories(); setStatus('error', '整图目录不存在', dir); render(); return; }
+    var naming = namingSnapshot();
     var mine = startJob('canvas', {id: 'canvas', label: '整图目录', path: dir, superPNG: S.canvasSuperPNG, setLast: function (le) { S.canvasLastExport = le; }},
-      {directory: dir, prefix: S.prefix, anchor: S.anchor, superPNG: S.canvasSuperPNG});
+      {directory: dir, prefix: naming.prefix, anchor: S.anchor, superPNG: S.canvasSuperPNG});
     host('Align4.describeDocument()', function (meta) {
       if (job !== mine) { return; }
       if (!meta.ok) { end(mine, new Error(meta.message)); return; }
-      var name = M.naming.normalize(translateName(M.naming.normalize(meta.name))) || 'canvas';
-      logger.info('export.object', '文档「' + meta.name + '」' + meta.width + '×' + meta.height + '，文件名 ' + M.outputFiles.nameFor(S.prefix, name) + '.png', {token: meta.token, revision: meta.revision}, job.id);
-      runPipeline(meta, name, {width: 0, height: 0});
+      var name = M.naming.normalize(finalName(M.naming.normalize(meta.name), {translate: naming.translate, override: null})) || 'canvas';
+      logger.info('export.object', '文档「' + meta.name + '」' + meta.width + '×' + meta.height + '，文件名 ' + M.outputFiles.nameFor(naming.prefix, name) + '.png', {token: meta.token, revision: meta.revision}, job.id);
+      runPipeline(meta, name, {width: 0, height: 0}, naming.prefix);
     });
   }
 
@@ -483,13 +584,13 @@
     var elapsed = now() - job.started, detail = '已用 ' + seconds(elapsed);
     if (job.stage === 'native') {
       if (job.attempts > 1) { detail += ' · Generator 没有响应，已自动重发 ' + (job.attempts - 1) + ' 次'; }
-      else if (elapsed > 5000) { detail += ' · 大文件需要更久，最多等 90 秒'; }
-    } else if (job.stage === 'superpng' && elapsed > 5000) { detail += ' · 大图编码较慢，最多等 180 秒'; }
+      else if (elapsed > 5000) { detail += ' · 大文件需要更久，Photoshop 接下命令后最多再等 90 秒'; }
+    } else if (job.stage === 'superpng' && elapsed > 5000) { detail += ' · 大图编码较慢，SuperPNG 这一步最多等 180 秒'; }
     detail += ' · 可随时取消';
     status = {kind: 'working', title: (job.scope === 'canvas' ? '整图：' : '') + (STAGE_TEXT[job.stage] || job.stage) + '…', detail: detail};
     renderStatus();
     var key = job.id + ':' + job.stage + ':' + job.attempts;
-    if (job.rendered !== key) { job.rendered = key; renderControls(); renderDirectories(); renderCanvas(); }
+    if (job.rendered !== key) { job.rendered = key; renderNaming(); renderControls(); renderDirectories(); renderCanvas(); }
     else {
       // Tick: update the timers in place so hovering "取消" is not disturbed by a rebuild.
       var spans = document.querySelectorAll ? document.querySelectorAll('.run-seconds') : [];
@@ -514,19 +615,21 @@
       t.setLast({ok: true, time: now(), file: file, width: record.width, height: record.height}); persist();
       lastResult = record;
       logger.info('export.end', '成功，总用时 ' + took, {file: record.file}, finished.id);
-      var learned = 0;
-      if (S.translate && finished.naming && finished.naming.override && getTranslator()) {
+      var learned = 0, learnFailed = false;
+      if (finished.naming && finished.naming.override && getTranslator()) {
         try {
           var pairs = translator.learn(finished.naming.source, finished.naming.name);
           learned = rememberTranslations(pairs);
           if (learned) { logger.info('translate', '记住 ' + learned + ' 条译法', {pairs: pairs}, finished.id); }
-          englishOverride = null; // the glossary now produces this English automatically
-        } catch (e) { logger.warn('translate', '保存译法失败：' + String(e.message || e)); }
+          // Drop the override only if the glossary now produces exactly this English by itself.
+          if (englishOverride && englishOverride.source === finished.naming.source && translator.translate(finished.naming.source).text === finished.naming.name) { englishOverride = null; }
+        } catch (e) { learnFailed = true; logger.warn('translate', '保存译法失败：' + String(e.message || e)); }
       }
       var padded = record.width !== record.originalWidth || record.height !== record.originalHeight;
       var over = finished.scope === 'selection' && finished.locked && oversize({width: record.originalWidth, height: record.originalHeight}, finished.min);
       status = {kind: over ? 'warn' : 'ok', title: (finished.scope === 'canvas' ? '整图已导出 ' : '已导出 ') + file + (over ? '（图像大于固定尺寸）' : ''), detail: record.width + ' × ' + record.height + (padded ? '（原 ' + record.originalWidth + ' × ' + record.originalHeight + '）' : '') +
-        ' · ' + record.encoder + ' · ' + took + ' · ' + t.label + (learned ? ' · 已记住 ' + learned + ' 条译法' : ''), open: true, sticky: true};
+        ' · ' + record.encoder + ' · ' + took + ' · ' + t.label + (learned ? ' · 已记住 ' + learned + ' 条译法' : '') +
+        (learnFailed ? ' · 文件已保存，但译法没能记到我的术语表（它可能正被 Excel 打开）' : ''), open: true, sticky: true};
     }
     tracker.resume(); tracker.refresh();
     render(); renderStatus();
@@ -544,7 +647,7 @@
     host('Align4.chooseFolder(' + quote(last) + ')', function (r) {
       choosingFolder = false;
       if (r.ok) {
-        if (M.settings.addDirectory(S.directories, r.path)) { persist(); logger.info('directory', '添加目录 ' + r.path); existsCache = {}; }
+        if (M.settings.addDirectory(S.directories, r.path)) { persist(); logger.info('directory', '添加目录 ' + r.path); invalidateDirectories(); }
         else { setStatus('warn', '这个目录已在列表中', r.path); status.sticky = true; }
       } else if (!r.cancelled) { setStatus('error', '无法选择目录', r.message); status.sticky = true; }
       render();
@@ -570,18 +673,19 @@
     choosingFolder = true; render();
     host('Align4.chooseFolder(' + quote(S.canvasDirectory || '') + ')', function (r) {
       choosingFolder = false;
-      if (r.ok) { S.canvasDirectory = r.path; persist(); existsCache = {}; logger.info('directory', '整图目录设为 ' + r.path); }
+      if (r.ok) { S.canvasDirectory = r.path; persist(); invalidateDirectories(); logger.info('directory', '整图目录设为 ' + r.path); }
       else if (!r.cancelled) { setStatus('error', '无法选择目录', r.message); status.sticky = true; }
       render();
     }, 0);
   }
 
   // ---------- Log panel ----------
+  var LOG_ROWS = 800;
   function logLine(entry) { var row = make('div', 'log-row log-' + entry.level, M.logger.format(entry, false)); return row; }
   function renderLog() {
     if (!logOpen) { return; }
     clear(el.logList);
-    var list = logger.entries(el.logVerbose.checked ? 'debug' : 'info').slice(-500);
+    var list = logger.entries(el.logVerbose.checked ? 'debug' : 'info').slice(-LOG_ROWS);
     if (!list.length) { el.logList.appendChild(make('p', 'log-empty', '暂无记录。执行一次导出后，这里会逐步显示每个环节和用时。')); }
     list.forEach(function (e) { el.logList.appendChild(logLine(e)); });
     el.logList.scrollTop = el.logList.scrollHeight;
@@ -609,7 +713,7 @@
     el.logCopy.disabled = true; setText(el.logCopy, '正在收集…');
     host('Align4.environment()', function (environment) {
       var generator;
-      try { generator = M.diagnostics.generatorSection({fs: M.fs, path: M.path, env: M.env}, 80); } catch (e) { generator = '读取失败：' + String(e.message || e); }
+      try { generator = M.diagnostics.generatorSection({fs: M.fs, path: M.path, env: M.env, prefer: M.diagnostics.yearFor(environment && environment.photoshop)}, 80); } catch (e) { generator = '读取失败：' + String(e.message || e); }
       var text = M.diagnostics.bundle({version: VERSION, environment: environment, state: panelState(), entries: logger.entries('debug').slice(-600), generator: generator, logFile: logger.file()});
       el.logCopy.disabled = false;
       if (copyText(text)) { setText(el.logCopy, '已复制 ✓'); logger.info('diagnostics', '诊断信息已复制（' + text.length + ' 字符）'); }
@@ -630,7 +734,19 @@
   }
 
   // ---------- Events ----------
+  // Enter that only confirms an IME candidate must not export. Chromium reports it as
+  // isComposing / keyCode 229; the explicit composition flag covers hosts that don't.
+  function trackComposition(input) {
+    input.addEventListener('compositionstart', function () { input.composing = true; });
+    input.addEventListener('compositionend', function () { input.composing = false; });
+    input.addEventListener('blur', function () { input.composing = false; });
+    // In case a host drops compositionend: a committed input event also ends it.
+    input.addEventListener('input', function (e) { if (e && e.isComposing === false) { input.composing = false; } });
+  }
+  function imeEnter(input, e) { return !!(input.composing || e.isComposing || e.keyCode === 229); }
+
   function bind() {
+    trackComposition(el.exportName); trackComposition(el.englishName);
     el.canvasFolder.addEventListener('click', function () { chooseCanvasFolder(); });
     el.translate.addEventListener('change', function () {
       S.translate = !!el.translate.checked; persist();
@@ -643,17 +759,26 @@
       el.englishName.addEventListener(type, function () {
         if (!S.translate || el.englishName.readOnly) { return; }
         var zh = M.naming.normalize(el.exportName.value) || (current ? M.naming.normalize(current.name) : ''), v = el.englishName.value, auto = autoEnglish(zh);
-        if (auto && v === auto.text) { englishOverride = null; }
+        if (auto && (v === auto.text || v === writtenMiddle(auto.text))) { englishOverride = null; }
         else if (!englishOverride || englishOverride.value !== v) { englishOverride = {source: zh, value: v}; }
         renderNaming();
       });
     });
     el.englishName.addEventListener('focus', function () { renderNaming(); });
     el.englishName.addEventListener('blur', function () {
-      if (englishOverride && !englishOverride.value.trim()) { englishOverride = null; } // emptied: back to automatic
+      if (englishOverride) {
+        var cleaned = cleanOverride(englishOverride.value);
+        if (!cleaned) { englishOverride = null; } // emptied: back to automatic
+        else {
+          englishOverride.value = cleaned; // show the name exactly as it will be written
+          var autoNow = autoEnglish(englishOverride.source);
+          if (autoNow && autoNow.text === cleaned) { englishOverride = null; } // same as automatic after all
+        }
+      }
       render();
     });
     el.englishName.addEventListener('keydown', function (e) {
+      if (imeEnter(el.englishName, e)) { return; }
       if (e.keyCode === 13) { e.preventDefault(); var d = recentDirectory(); if (d) { exportTo(d); } }
       else if (e.keyCode === 27) { englishOverride = null; el.englishName.blur(); render(); }
     });
@@ -665,7 +790,7 @@
     el.canvasExport.addEventListener('click', function () { if (job && job.target.id === 'canvas') { cancelCurrent(); } else { exportCanvas(); } });
     el.canvasDirPath.addEventListener('click', function () { if (S.canvasDirectory && directoryExists(S.canvasDirectory)) { openFolder(S.canvasDirectory); } });
     el.canvasSuperPNG.addEventListener('change', function () { S.canvasSuperPNG = !!el.canvasSuperPNG.checked; persist(); logger.info('setting', '整图 SuperPNG ' + (S.canvasSuperPNG ? '开启' : '关闭')); render(); });
-    el.refresh.addEventListener('click', function () { existsCache = {}; status = null; tracker.refresh(); render(); });
+    el.refresh.addEventListener('click', function () { invalidateDirectories(); status = null; tracker.refresh(); render(); });
     el.openLog.addEventListener('click', function () { setLogOpen(true); });
     el.statusLog.addEventListener('click', function () { setLogOpen(true); });
     el.logClose.addEventListener('click', function () { setLogOpen(false); });
@@ -687,10 +812,11 @@
         S.minWidth = el.minWidth.value; S.minHeight = el.minHeight.value;
       }
       S.sizeLocked = !S.sizeLocked; persist();
+      if (!S.sizeLocked) { sizeOwner = current ? current.token : null; } // unfixed again: now belongs to this object
       logger.info('setting', S.sizeLocked ? '固定输出尺寸 ' + (S.minWidth || '自动') + ' × ' + (S.minHeight || '自动') : '解除固定尺寸');
       render();
     });
-    function sizeChanged() { S.minWidth = el.minWidth.value; S.minHeight = el.minHeight.value; persist(); render(); }
+    function sizeChanged() { S.minWidth = el.minWidth.value; S.minHeight = el.minHeight.value; sizeOwner = current ? current.token : null; persist(); render(); }
     ['input', 'change'].forEach(function (t) { el.minWidth.addEventListener(t, sizeChanged); el.minHeight.addEventListener(t, sizeChanged); });
     function prefixChanged() { if (el.prefix.value !== S.prefix) { S.prefix = el.prefix.value; persist(); render(); } }
     ['input', 'change', 'compositionend', 'keyup', 'blur'].forEach(function (t) { el.prefix.addEventListener(t, prefixChanged); });
@@ -700,13 +826,28 @@
     ['input', 'change', 'compositionend', 'keyup'].forEach(function (t) { el.exportName.addEventListener(t, nameChanged); });
     el.exportName.addEventListener('blur', function () { nameChanged(); render(); });
     el.exportName.addEventListener('keydown', function (e) {
+      if (imeEnter(el.exportName, e)) { return; }
       if (e.keyCode === 13) { nameChanged(); var d = recentDirectory(); if (d) { exportTo(d); } }
     });
     el.resetName.addEventListener('click', function () { namer.reset(); el.exportName.value = namer.state().value; render(); el.exportName.focus(); });
     document.addEventListener('visibilitychange', function () { if (!document.hidden && tracker) { tracker.poke(); } });
-    window.addEventListener('focus', function () { existsCache = {}; if (S.translate && translator) { renderNaming(); } if (tracker) { tracker.poke(); } });
+    window.addEventListener('focus', function () { invalidateDirectories(); userCache.checked = 0; if (S.translate && translator) { renderNaming(); } if (tracker) { tracker.poke(); } });
     window.addEventListener('beforeunload', cleanup);
     window.addEventListener('error', function (e) { if (logger) { logger.error('script', '面板脚本错误：' + (e && e.message), {file: e && e.filename, line: e && e.lineno, stack: e && e.error && e.error.stack}); } });
+  }
+
+  // Content edits seen through Photoshop notifications. An export compares this count
+  // when the history ID cannot be read (revision null), so edits made while it waits
+  // still stop the file from being saved.
+  var editEvents = {}, editCount = 0;
+  function onPhotoshopEvent(event) {
+    var data;
+    try { data = event && typeof event.data === 'object' ? event.data : JSON.parse(String(event && event.data).replace(/^ver\d+,/, '')); } catch (e) { return; }
+    if (!data) { return; }
+    var id = String(data.eventID != null ? data.eventID : data.eventId);
+    if (!editEvents[id]) { return; } // selection changes and unknown events are not edits
+    if (/"_ref"\s*:\s*"application"/.test(JSON.stringify(data))) { return; } // application settings, not the document
+    editCount++;
   }
 
   function registerPhotoshopEvents() {
@@ -717,12 +858,12 @@
     } catch (e) {}
     function dispatch(type, id) { bridge.dispatchEvent(JSON.stringify({type: type, scope: 'APPLICATION', extensionId: extensionId, appId: appId, data: String(id)})); }
     function listen(type, fn) { try { bridge.addEventListener(type, fn); listeners.push([type, fn]); } catch (e) {} }
-    listen('com.adobe.PhotoshopJSONCallback' + extensionId, function () { if (tracker) { tracker.poke(); } });
+    listen('com.adobe.PhotoshopJSONCallback' + extensionId, function (event) { onPhotoshopEvent(event); if (tracker) { tracker.poke(); } });
     listen('documentAfterActivate', function () { if (tracker) { tracker.poke(); } });
     listen('com.adobe.csxs.events.ThemeColorChanged', applyTheme);
     host('Align4.eventIDs()', function (r) {
       if (!r.ok) { logger.warn('events', '无法注册 Photoshop 通知，改为定时检测', {message: r.message}); return; }
-      r.events.forEach(function (e) { try { dispatch('com.adobe.PhotoshopRegisterEvent', e.id); registered.push([e.id, dispatch]); } catch (x) {} });
+      r.events.forEach(function (e) { editEvents[String(e.id)] = !!e.edit; try { dispatch('com.adobe.PhotoshopRegisterEvent', e.id); registered.push([e.id, dispatch]); } catch (x) {} });
     });
   }
 
@@ -765,7 +906,10 @@
     logger.onEntry(function (entry) {
       if (!logOpen || (entry.level === 'debug' && !el.logVerbose.checked)) { return; }
       var empty = el.logList.querySelector('.log-empty'); if (empty) { el.logList.removeChild(empty); }
-      el.logList.appendChild(logLine(entry)); el.logList.scrollTop = el.logList.scrollHeight;
+      var follow = el.logList.scrollHeight - el.logList.scrollTop - el.logList.clientHeight < 40;
+      el.logList.appendChild(logLine(entry));
+      while (el.logList.children.length > LOG_ROWS) { el.logList.removeChild(el.logList.firstChild); }
+      if (follow) { el.logList.scrollTop = el.logList.scrollHeight; }
     });
     var hostEnv = null; try { hostEnv = JSON.parse(bridge.getHostEnvironment()); } catch (e) {}
     logger.info('panel.start', '面板启动 v' + VERSION, {app: hostEnv && hostEnv.appVersion, locale: hostEnv && hostEnv.appLocale, os: M.os.platform() + ' ' + M.os.release(), logWriteError: logger.writeError()});

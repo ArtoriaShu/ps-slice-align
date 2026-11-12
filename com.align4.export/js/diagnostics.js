@@ -15,7 +15,8 @@ function newest(fs, path, dir, out) {
 }
 
 // Generator writes its logs under %APPDATA%\Adobe\Adobe Photoshop <ver>\Generator\logs
-// (some versions omit "logs", some use LOCALAPPDATA). Search all and take the newest.
+// (some versions omit "logs", some use LOCALAPPDATA; current ones use Logs\Generator).
+// Search all; prefer the running Photoshop's folder (o.prefer, e.g. "2020"), then the newest.
 exports.findGeneratorLog = function (o) {
   var roots = [], searched = [], files = [];
   [o.env.APPDATA, o.env.LOCALAPPDATA].forEach(function (base) { if (base) { roots.push(o.path.join(base, 'Adobe')); } });
@@ -23,14 +24,21 @@ exports.findGeneratorLog = function (o) {
     var names = [];
     try { names = o.fs.readdirSync(root); } catch (e) { searched.push(root + '（不存在）'); return; }
     names.filter(function (n) { return /photoshop/i.test(n); }).forEach(function (n) {
-      [['Generator', 'logs'], ['Generator']].forEach(function (parts) {
-        var dir = o.path.join.apply(o.path, [root, n].concat(parts));
+      [['Generator', 'logs'], ['Generator'], ['Logs', 'Generator']].forEach(function (parts) {
+        var dir = o.path.join.apply(o.path, [root, n].concat(parts)), before = files.length;
         searched.push(dir); newest(o.fs, o.path, dir, files);
+        for (var i = before; i < files.length; i++) { files[i].folder = n; files[i].preferred = !!o.prefer && n.indexOf(o.prefer) >= 0; }
       });
     });
   });
-  files.sort(function (a, b) { return b.mtime - a.mtime; });
+  files.sort(function (a, b) { return (b.preferred - a.preferred) || (b.mtime - a.mtime); });
   return {file: files.length ? files[0] : null, searched: searched};
+};
+
+// Photoshop's version number -> the year in its folder name (21.x -> "2020").
+exports.yearFor = function (appVersion) {
+  var major = parseInt(String(appVersion || ''), 10);
+  return major >= 20 ? String(major + 1999) : null;
 };
 
 exports.tail = function (fs, file, maxLines, maxBytes) {
@@ -47,7 +55,8 @@ exports.generatorSection = function (o, maxLines) {
   var found = exports.findGeneratorLog(o);
   if (!found.file) { return '未找到 Generator 日志。已查找：\n  ' + (found.searched.join('\n  ') || '（无 APPDATA）'); }
   var when = new Date(found.file.mtime);
-  var head = found.file.file + '（' + Math.round(found.file.size / 1024) + ' KB，最后修改 ' + when.toLocaleString() + '）';
+  var head = found.file.file + '（' + found.file.folder + (o.prefer ? (found.file.preferred ? '，与当前 Photoshop 版本一致' : '，未找到 ' + o.prefer + ' 版的日志，这是其它版本的') : '') +
+    '，' + Math.round(found.file.size / 1024) + ' KB，最后修改 ' + when.toLocaleString() + '）';
   try { return head + '\n' + exports.tail(o.fs, found.file.file, maxLines || 80).join('\n'); }
   catch (e) { return head + '\n读取失败：' + String(e.message || e); }
 };

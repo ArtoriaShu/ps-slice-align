@@ -77,6 +77,8 @@
     },
     readFileSync: function (p) { var text = memFiles[p].text; return {toString: function () { return text; }}; },
     writeFileSync: function (p, text) { memFiles[p] = {text: String(text), t: Date.now() + Math.random()}; },
+    renameSync: function (from, to) { memFiles[to] = {text: memFiles[from].text, t: Date.now() + Math.random()}; delete memFiles[from]; },
+    unlinkSync: function (p) { delete memFiles[p]; },
     readdirSync: function () { return []; }, mkdirSync: function () {}, appendFileSync: function () {}
   };
   var os = {platform: function () { return 'win32'; }, release: function () { return '10.0.19045'; }, tmpdir: function () { return 'C:\\Users\\设计\\AppData\\Local\\Temp'; }};

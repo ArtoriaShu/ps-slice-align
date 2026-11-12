@@ -38,8 +38,15 @@ function boot(t, opts = {}) {
   const logs = fs.mkdtempSync(path.join(os.tmpdir(), 'align4-test-panel-log-'));
   t.after(() => { fs.rmSync(out, {recursive: true, force: true}); fs.rmSync(logs, {recursive: true, force: true}); });
   process.env.ALIGN4_LOG_DIR = logs; t.after(() => { delete process.env.ALIGN4_LOG_DIR; });
+  // 我的术语表 lives under APPDATA: give every test its own (unless it set one up), never the real one.
+  if (!/align4-test-appdata-/.test(process.env.APPDATA || '')) {
+  const appdata = fs.mkdtempSync(path.join(os.tmpdir(), 'align4-test-appdata-'));
+  const oldAppdata = process.env.APPDATA; process.env.APPDATA = appdata;
+  t.after(() => { if (oldAppdata === undefined) { delete process.env.APPDATA; } else { process.env.APPDATA = oldAppdata; } fs.rmSync(appdata, {recursive: true, force: true}); });
+  }
   const settings = Object.assign({directories: [{id: 'd1', path: out, name: '输出'}]}, opts.settings);
   if (opts.canvasHere) { settings.canvasDirectory = out; }
+  const hostListeners = {};
   const nodes = {}, scripts = [], storage = new Map(opts.storage ? Object.entries(opts.storage) : [['align4-settings-v2', JSON.stringify(settings)]]);
   let selected = {token: '1|5|1', name: '按钮', kind: '图层', revision: '3'};
   const p0 = {slowNext: false};
@@ -53,7 +60,7 @@ function boot(t, opts = {}) {
     localStorage: {getItem: k => (storage.has(k) ? storage.get(k) : null), setItem: (k, v) => storage.set(k, v)},
     __adobe_cep__: {
       getSystemPath: () => ROOT, getHostEnvironment: () => JSON.stringify({appId: 'PHXS', appVersion: '21.2', appSkinInfo: {panelBackgroundColor: {color: {red: 50, green: 50, blue: 50}}}}),
-      addEventListener() {}, removeEventListener() {}, dispatchEvent() {}, resizeContent() {},
+      addEventListener(type, fn) { hostListeners[type] = fn; }, removeEventListener() {}, dispatchEvent() {}, resizeContent() {},
       evalScript(script, cb) {
         assert.match(script, /^Align4v2\./, 'the panel talks to the 2.x host object');
         script = script.replace(/^Align4v2\./, 'Align4.');
@@ -61,7 +68,7 @@ function boot(t, opts = {}) {
         const reply = v => setTimeout(() => cb(JSON.stringify(v)), p0.slowNext && /describeSelection/.test(script) && !(p0.slowNext = false) ? 200 : 1);
         if (script === 'Align4.describeSelection()' || script === 'Align4.selectionToken()') return reply(selected.fail ? {ok: false, message: '每次只选择一个图层、图层组或画板。'} : Object.assign({ok: true}, selected));
         if (script === 'Align4.describeDocument()') return reply({ok: true, token: '1|canvas', name: '设计稿', kind: '整个画布', width: 9, height: 7, revision: '3'});
-        if (script === 'Align4.eventIDs()') return reply({ok: true, events: []});
+        if (script === 'Align4.eventIDs()') return reply({ok: true, events: opts.events || []});
         if (script === 'Align4.environment()') return reply({ok: true, photoshop: '21.2'});
         const m = /^Align4\.startNative(Canvas)?\((.*)\)$/.exec(script);
         if (m) {
@@ -79,7 +86,7 @@ function boot(t, opts = {}) {
   const context = vm.createContext({window: win, document: doc, JSON, Date, Error, Math, Object, Array, String, Number, Buffer, decodeURI, isFinite, require, process});
   vm.runInContext(fs.readFileSync(path.join(ROOT, 'js/panel.js'), 'utf8'), context);
   t.after(() => { try { win.Align4Panel && win.Align4Panel.tracker().stop(); } catch (e) {} timers.forEach(h => { clearTimeout(h); clearInterval(h); }); });
-  return {nodes, scripts, out, logs, storage, api: win.Align4Panel, slowNextDescribe() { p0.slowNext = true; }, select(s) { selected = s; },
+  return {nodes, scripts, out, logs, storage, doc, emitHost(type, event) { if (hostListeners[type]) hostListeners[type](event); }, api: win.Align4Panel, slowNextDescribe() { p0.slowNext = true; }, select(s) { selected = s; },
     exportButton() { const row = nodes.directoryList.children[0]; return row && row.children[2]; }};
 }
 
@@ -298,4 +305,129 @@ test('an empty name exports with the layer name, which shows as the placeholder'
   p.exportButton().fire('click');
   await until(() => fs.readdirSync(p.out).length === 1);
   assert.deepEqual(fs.readdirSync(p.out), ['按钮.png']);
+});
+
+// ---------- Review regressions (2026-11-12) ----------
+
+test('the export button survives the name field losing focus (first click after renaming exports)', async t => {
+  const p = boot(t);
+  await until(() => p.exportButton() && !p.exportButton().disabled);
+  const pressed = p.exportButton();
+  p.nodes.exportName.value = '确认按钮'; p.nodes.exportName.fire('input');
+  p.nodes.exportName.fire('blur'); // mousedown on the button blurs the field first
+  assert.equal(p.exportButton(), pressed, 'the pressed button must still be the one in the list');
+  await until(() => !p.api.namer().state().pending);
+  p.api.render();
+  assert.equal(p.exportButton(), pressed);
+  pressed.fire('click');
+  await until(() => fs.readdirSync(p.out).length === 1);
+  assert.deepEqual(fs.readdirSync(p.out), ['确认按钮.png']);
+});
+
+test('unfixed dimensions do not carry over to another layer through an invalid selection', async t => {
+  const p = boot(t);
+  await until(() => p.nodes.objectName.textContent === '按钮');
+  p.nodes.minWidth.value = '100'; p.nodes.minWidth.fire('input');
+  p.select({fail: true}); p.api.tracker().refresh();
+  await until(() => /每次只选择一个/.test(p.nodes.objectName.textContent));
+  p.select({token: '1|6|1', name: '背景', kind: '图层', revision: '4'}); p.api.tracker().refresh();
+  await until(() => p.nodes.objectName.textContent === '背景');
+  assert.equal(p.nodes.minWidth.value, '');
+});
+
+test('unfixed dimensions survive an invalid selection when the same layer comes back', async t => {
+  const p = boot(t);
+  await until(() => p.nodes.objectName.textContent === '按钮');
+  p.nodes.minWidth.value = '100'; p.nodes.minWidth.fire('input');
+  p.select({fail: true}); p.api.tracker().refresh();
+  await until(() => /每次只选择一个/.test(p.nodes.objectName.textContent));
+  p.select({token: '1|5|1', name: '按钮', kind: '图层', revision: '3'}); p.api.tracker().refresh();
+  await until(() => p.nodes.objectName.textContent === '按钮');
+  assert.equal(p.nodes.minWidth.value, '100');
+});
+
+test('an unfixed size typed for one object is not applied when export finds another', async t => {
+  const p = boot(t);
+  await until(() => p.exportButton() && !p.exportButton().disabled);
+  p.nodes.minWidth.value = '100'; p.nodes.minWidth.fire('input');
+  p.select({token: '1|6|1', name: '背景', kind: '图层', revision: '4'}); // Photoshop changed, panel not refreshed yet
+  p.exportButton().fire('click');
+  await until(() => p.nodes.statusTitle.textContent === '导出失败');
+  assert.match(p.nodes.statusDetail.textContent, /上一个对象/);
+  assert.deepEqual(fs.readdirSync(p.out), []);
+});
+
+test('naming controls lock at once and the name is fixed at the click', async t => {
+  const p = boot(t, {settings: {translate: true}});
+  await until(() => p.nodes.objectName.textContent === '按钮');
+  p.nodes.exportName.value = '确认按钮'; p.nodes.exportName.fire('input');
+  await until(() => !p.api.namer().state().pending);
+  p.slowNextDescribe(); p.api.exportTo(0);
+  assert.equal(p.nodes.englishName.disabled, true);
+  assert.equal(p.nodes.translate.disabled, true);
+  p.nodes.translate.checked = false; p.nodes.translate.fire('change'); // ignored by this export
+  await until(() => fs.readdirSync(p.out).length === 1);
+  assert.deepEqual(fs.readdirSync(p.out), ['confirm_btn.png']);
+});
+
+test('Enter that confirms an IME candidate does not export', async t => {
+  const p = boot(t);
+  await until(() => p.exportButton() && !p.exportButton().disabled);
+  p.nodes.exportName.fire('compositionstart');
+  p.nodes.exportName.value = '确认';
+  p.nodes.exportName.fire('keydown', {keyCode: 13, isComposing: true, preventDefault() {}});
+  p.nodes.exportName.fire('keydown', {keyCode: 229, preventDefault() {}});
+  p.nodes.exportName.fire('keydown', {keyCode: 13, preventDefault() {}}); // composition flag still set
+  await wait(50);
+  assert.equal(p.scripts.filter(s => s.startsWith('Align4.startNative')).length, 0);
+  p.nodes.exportName.fire('compositionend'); p.nodes.exportName.fire('input');
+  p.nodes.exportName.fire('keydown', {keyCode: 13, preventDefault() {}});
+  await until(() => fs.readdirSync(p.out).length === 1);
+  assert.deepEqual(fs.readdirSync(p.out), ['确认.png']);
+});
+
+test('without history IDs, an edit notification during export stops it', async t => {
+  const MOVE = 1836021349;
+  const p = boot(t, {events: [{id: 1936483188, edit: false}, {id: MOVE, edit: true}]});
+  p.select({token: '1|5|1', name: '按钮', kind: '图层', revision: null});
+  await until(() => p.exportButton() && !p.exportButton().disabled);
+  await wait(30);
+  p.exportButton().fire('click');
+  await until(() => p.scripts.some(s => s.startsWith('Align4.startNative')));
+  p.emitHost('com.adobe.PhotoshopJSONCallbackcom.align4.export.panel', {data: 'ver1,{"eventID":' + MOVE + ',"eventData":{}}'});
+  await until(() => p.nodes.statusTitle.textContent === '导出失败');
+  assert.match(p.nodes.statusDetail.textContent, /被编辑/);
+  assert.deepEqual(fs.readdirSync(p.out), []);
+});
+
+test('selection notifications alone do not fail an export without history IDs', async t => {
+  const SLCT = 1936483188;
+  const p = boot(t, {events: [{id: SLCT, edit: false}]});
+  p.select({token: '1|5|1', name: '按钮', kind: '图层', revision: null});
+  await until(() => p.exportButton() && !p.exportButton().disabled);
+  p.exportButton().fire('click');
+  await until(() => p.scripts.some(s => s.startsWith('Align4.startNative')));
+  p.emitHost('com.adobe.PhotoshopJSONCallbackcom.align4.export.panel', {data: 'ver1,{"eventID":' + SLCT + '}'});
+  await until(() => fs.readdirSync(p.out).length === 1);
+});
+
+test('typed English is shown and written in the glossary format', async t => {
+  const p = boot(t, {settings: {translate: true}});
+  await until(() => p.nodes.objectName.textContent === '按钮');
+  p.nodes.englishName.value = 'confirm button'; p.nodes.englishName.fire('input');
+  p.nodes.englishName.fire('blur');
+  assert.equal(p.nodes.englishName.value, 'confirm_button');
+  p.api.exportTo(0);
+  await until(() => fs.readdirSync(p.out).length === 1);
+  assert.deepEqual(fs.readdirSync(p.out), ['confirm_button.png']);
+});
+
+test('the file field shows characters Windows cannot use as they will be written', async t => {
+  const p = boot(t);
+  p.select({token: '1|7|1', name: '按钮/确认', kind: '图层', revision: '3'});
+  await until(() => p.nodes.objectName.textContent === '按钮/确认');
+  assert.equal(p.nodes.englishName.value, '按钮_确认');
+  p.api.exportTo(0);
+  await until(() => fs.readdirSync(p.out).length === 1);
+  assert.deepEqual(fs.readdirSync(p.out), ['按钮_确认.png']);
 });

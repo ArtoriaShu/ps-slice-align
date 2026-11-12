@@ -36,6 +36,8 @@ function cleanEnglish(value) {
   if (CJK.test(v)) { return v.replace(/\s+/g, '_'); }
   return v.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, ''); // case kept: English is used as written
 }
+// The panel applies the same rule to English typed in the file field.
+exports.cleanEnglish = cleanEnglish;
 
 // Glossary CSV -> {中文: english}. First row wins; "#" rows and the header are ignored.
 exports.loadGlossary = function (text) {
@@ -68,8 +70,8 @@ exports.create = function (o) {
   }
 
   // Split a run of Chinese characters into words, preferring glossary words.
-  function segment(run, parts) {
-    var u = user(), i = 0, pending = '';
+  function segment(run, parts, u) {
+    var i = 0, pending = '';
     function flush() { if (pending) { parts.push({src: pending, out: pending, source: 'none'}); pending = ''; } }
     while (i < run.length) {
       var lu = longest(u, run, i), lb = longest(o.builtin, run, i), ld = longest(o.dict, run, i);
@@ -88,14 +90,16 @@ exports.create = function (o) {
     flush();
   }
 
-  function translate(name) {
+  // extra: entries tried on top of the user's glossary (used to check what learning would do).
+  function translate(name, extra) {
     name = String(name || '').trim();
     var u = user(), parts = [];
+    if (extra) { var merged = {}; Object.keys(u).forEach(function (k) { merged[k] = u[k]; }); Object.keys(extra).forEach(function (k) { merged[k] = extra[k]; }); u = merged; }
     // A whole-name entry (learned from a correction) is used as-is.
     if (name && has(u, name)) { return result([{src: name, out: u[name], source: 'user'}], name); }
     var tokens = name.match(/[㐀-鿿]+|[A-Za-z0-9]+/g) || [];
     tokens.forEach(function (t) {
-      if (CJK.test(t)) { segment(t, parts); }
+      if (CJK.test(t)) { segment(t, parts, u); }
       else { parts.push({src: t, out: t, source: 'ascii'}); }
     });
     return result(parts, name);
@@ -114,20 +118,28 @@ exports.create = function (o) {
   }
 
   // What to remember when the user corrects an automatic name before exporting.
-  // Same number of words: learn each changed word. Otherwise: learn the whole name.
+  // Exactly one word changed (same word count): learn that word, provided it alone
+  // reproduces the whole corrected name. Anything bigger (several words, reordering,
+  // different length) is learned as a whole-name entry, so a rewrite such as
+  // 按钮/确认 -> confirm_button never teaches 按钮 = confirm.
   function learn(sourceName, finalName) {
     var auto = translate(sourceName), pairs = [];
-    finalName = String(finalName || '').trim();
+    finalName = cleanEnglish(finalName); // stored the way the glossary will read it back
     if (!finalName || finalName === auto.text) { return pairs; }
     var finalWords = finalName.split('_'), counts = auto.parts.map(function (p) { return p.out.split('_').length; });
     var total = counts.reduce(function (a, b) { return a + b; }, 0);
     if (total === finalWords.length) {
-      var at = 0;
+      var at = 0, changed = 0;
       auto.parts.forEach(function (p, k) {
         var now = finalWords.slice(at, at + counts[k]).join('_'); at += counts[k];
-        if (now !== p.out && CJK.test(p.src) && now && !CJK.test(now)) { pairs.push([p.src, now]); }
+        if (now !== p.out) { changed++; if (CJK.test(p.src) && now && !CJK.test(now)) { pairs.push([p.src, now]); } }
       });
-      if (pairs.length) { return pairs; }
+      if (changed !== 1) { pairs = []; }
+      if (pairs.length) {
+        var trial = {}; pairs.forEach(function (p) { trial[p[0]] = cleanEnglish(p[1]); });
+        if (translate(sourceName, trial).text === finalName) { return pairs; }
+        pairs = [];
+      }
     }
     var key = String(sourceName || '').trim();
     if (key && CJK.test(key) && !CJK.test(finalName)) { pairs.push([key, finalName]); }

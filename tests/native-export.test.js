@@ -144,3 +144,15 @@ test('diagnostics find the newest Generator log and include its tail', t => {
   const text = diagnostics.bundle({version: '1.12.0', environment: {ok: true}, state: {}, entries: [{time: 0, level: 'info', event: 'e', message: 'm'}], generator: section});
   assert.match(text, /插件版本：1\.12\.0/); assert.match(text, /e  m/);
 });
+
+test('an incomplete PNG that stops changing is not re-read on every poll', t => {
+  let reads = 0;
+  const real = fs.readFileSync;
+  fs.readFileSync = function (p, ...rest) { if (/align4-native-/.test(String(p))) { reads++; } return real.call(fs, p, ...rest); };
+  t.after(() => { fs.readFileSync = real; });
+  const w = world(t, ({write, callback}) => { callback({ok: true}); write('x.png', image(6, 6).subarray(0, 20)); });
+  const r = w.run({timeout: 10000, resendAfter: []});
+  assert.equal(r.error.code, 'ALIGN4_PNG_TIMEOUT');
+  assert.ok(reads <= 6, 'read ' + reads + ' times in 10 s (was 20 before)');
+  assert.ok(reads >= 2, 'still re-checked now and then');
+});

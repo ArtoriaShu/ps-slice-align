@@ -2,7 +2,9 @@
 // One export, start to finish. Every entry point (any directory, slice or whole
 // canvas) runs this same pipeline:
 //   native PNG (Generator) -> verify object unchanged -> pad to 4x -> SuperPNG (optional)
-//   -> verify again -> write with collision numbering.
+//   -> verify again (always) -> write with collision numbering.
+// The last check and the write are separate processes (Photoshop / CEP), so a tiny
+// window remains; it is as small as it can be, not atomic.
 
 function quote(s) { return JSON.stringify(s).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029'); }
 
@@ -17,7 +19,8 @@ exports.STAGES = {
 
 // o: {fs, path, os, png, rules, outputFiles, nativeExport, superPNG, host, now, setTimeout, clearTimeout, log, job}
 // request: {scope:'selection'|'canvas', meta (fresh describe result), name, prefix, directory,
-//           minWidth, minHeight, anchor, superPNG, onStage(stage, detail)}
+//           minWidth, minHeight, anchor, superPNG, onStage(stage, detail),
+//           edits() -> edit-notification count, editsAtStart}
 // callback(error, record)
 exports.run = function (o, request, callback) {
   var meta = request.meta, finished = false, nativeJob = null, started = o.now(), canvas = request.scope === 'canvas';
@@ -44,9 +47,11 @@ exports.run = function (o, request, callback) {
       if (finished) { return; }
       if (!current || !current.ok) { fail((current && current.message) || '无法确认当前对象。'); return; }
       if (current.token !== meta.token) { fail(canvas ? '当前文档已改变（' + reason + '），未保存。' : '选择已改变（' + reason + '），未保存，请重新导出。'); return; }
-      if (meta.revision != null && current.revision != null && current.revision !== meta.revision) {
-        fail('内容在' + reason + '期间被编辑，未保存，请停止编辑后重新导出。'); return;
-      }
+      var known = meta.revision != null && current.revision != null;
+      // Without comparable history IDs, fall back to the edit notifications counted by the panel.
+      var edited = known ? current.revision !== meta.revision :
+        (request.edits && request.editsAtStart != null && request.edits() !== request.editsAtStart);
+      if (edited) { fail('内容在' + reason + '期间被编辑，未保存，请停止编辑后重新导出。'); return; }
       if (canvas && (current.width !== meta.width || current.height !== meta.height)) { fail('画布尺寸在导出期间改变，未保存。'); return; }
       next();
     });
@@ -80,7 +85,9 @@ exports.run = function (o, request, callback) {
   }
 
   function encode(data, record) {
-    if (!request.superPNG) { write(data, record); return; }
+    // Padding can take a while on big images and Photoshop stays editable meanwhile:
+    // every path checks the source once more right before the file is written.
+    if (!request.superPNG) { verify('补边', function () { write(data, record); }); return; }
     stage('superpng');
     var t0 = o.now();
     o.superPNG.encode({fs: o.fs, path: o.path, os: o.os, png: o.png, host: o.host}, data, true, function (error, encoded) {

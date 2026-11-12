@@ -62,3 +62,23 @@ test('learning: a restructured name is learned as a whole-name entry; no-ops lea
 test('English mixed into a Chinese name keeps its case', () => {
   assert.equal(translator().translate('BtnOK确认').text, 'BtnOK_confirm');
 });
+
+test('a mixed English/Chinese correction is learned so the whole name comes back', () => {
+  const user = {}, tr = t.create({user: () => user, builtin, dict: {}});
+  assert.equal(tr.translate('Btn确认').text, 'Btn_confirm');
+  tr.learn('Btn确认', 'Button_ok').forEach(([k, v]) => { user[k] = v; });
+  assert.equal(tr.translate('Btn确认').text, 'Button_ok');
+});
+
+test('typed English and learned English use the same format (first and next export match)', () => {
+  assert.equal(t.cleanEnglish('confirm button'), 'confirm_button');
+  assert.equal(t.cleanEnglish('confirm-button'), 'confirm_button');
+  const pairs = translator().learn('确认', 'confirm button');
+  const user = t.loadGlossary(pairs.map(t.csvLine).join('\n'));
+  assert.equal(translator(user).translate('确认').text, t.cleanEnglish('confirm button'));
+});
+
+test('changing several words at once is learned as the whole name, not word by word', () => {
+  assert.deepEqual(translator().learn('按钮/确认', 'confirm_button'), [['按钮/确认', 'confirm_button']]);
+  assert.deepEqual(translator().learn('头像闪光', 'shine_avatar'), [['头像闪光', 'shine_avatar']]);
+});

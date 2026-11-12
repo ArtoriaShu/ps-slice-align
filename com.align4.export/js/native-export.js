@@ -10,7 +10,8 @@ exports.DEFAULTS = {
   poll: 250,                  // ms between directory scans
   resendAfter: [10000, 30000],// ms after the first send: re-issue the command if no file has appeared
   timeout: 90000,             // ms before giving up entirely
-  progressEvery: 1000
+  progressEvery: 1000,
+  recheckUnchanged: 2000      // ms: an unchanged file that failed to parse is re-read at most this often
 };
 
 function remove(fs, path, p) {
@@ -44,7 +45,7 @@ function scan(fs, path, dir, depth) {
     var file = path.join(dir, name), stat;
     try { stat = fs.lstatSync(file); } catch (e) { if (e.code === 'ENOENT') { return; } throw e; }
     if (stat.isDirectory() && !stat.isSymbolicLink()) { out = out.concat(scan(fs, path, file, depth + 1)); }
-    else if (stat.isFile() && /\.png$/i.test(name)) { out.push({file: file, size: stat.size}); }
+    else if (stat.isFile() && /\.png$/i.test(name)) { out.push({file: file, size: stat.size, mtime: stat.mtimeMs}); }
   });
   return out;
 }
@@ -128,9 +129,17 @@ exports.run = function (o, spec, callback) {
     // a large file every poll while Generator is still writing it.
     if (f.size > 0 && f.size === attempt.size) { attempt.stable++; } else { attempt.stable = 0; attempt.size = f.size; }
     if (attempt.stable < 1) { return null; }
+    // A file that already failed to parse and has not changed since is not read
+    // again every poll (big PNGs); a slow backstop re-read covers coarse timestamps.
+    var bad = attempt.bad;
+    if (bad && bad.file === f.file && bad.size === f.size && bad.mtime === f.mtime && o.now() - bad.at < cfg.recheckUnchanged) { return null; }
     var data = o.fs.readFileSync(f.file), measured;
     try { measured = o.png.parse(data); }
-    catch (e) { lastError = String(e.message || e); attempt.stable = 0; attempt.size = -1; return null; }
+    catch (e) {
+      lastError = String(e.message || e); attempt.stable = 0; attempt.size = -1;
+      attempt.bad = {file: f.file, size: f.size, mtime: f.mtime, at: o.now()};
+      return null;
+    }
     return {file: f.file, dir: attempt.dir, data: data, measured: measured, attempt: attempt.number};
   }
 

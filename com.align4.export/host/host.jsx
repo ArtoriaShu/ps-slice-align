@@ -168,7 +168,7 @@ var Align4v2 = (function () {
     // Read-only facts for the diagnostic bundle. Every field is optional.
     function environment() {
         var out = {ok:true, photoshop:String(app.version), os:String($.os), openDocuments:app.documents.length};
-        try { out.scratchFreeMB = Math.round(app.freeMemory / 1048576); } catch (e) {}
+        try { out.freeMemoryMB = Math.round(app.freeMemory / 1048576); } catch (e) {}
         if (!app.documents.length) { return json(out); }
         var doc = app.activeDocument, d = {name:String(doc.name)};
         try { d.width = Math.round(doc.width.as('px')); d.height = Math.round(doc.height.as('px')); } catch (e) {}

@@ -54,7 +54,7 @@ test('selection export pads to a multiple of 4 and writes with the prefix', asyn
   assert.equal(path.basename(r.record.file), 'ui_按钮.png');
   const written = png.parse(fs.readFileSync(r.record.file)); assert.equal(written.width, 8); assert.equal(written.height, 4);
   assert.deepEqual([r.record.originalWidth, r.record.originalHeight], [5, 3]);
-  assert.deepEqual(r.stages, ['native', 'verify', 'pad', 'write', 'done']);
+  assert.deepEqual(r.stages, ['native', 'verify', 'pad', 'verify', 'write', 'done'], 'checked again after padding, before writing');
   assert.match(r.scripts[0], /^Align4\.startNative\("doc\|7\|1",/);
 });
 
@@ -119,4 +119,36 @@ test('cancel stops the job with a recognisable error', t => {
     nativeExport: {run() { return {cancel() {}}; }}};
   const handle = exportJob.run(o, {scope: 'selection', meta: s.meta, name: 'x', directory: s.dir}, (error) => { result = error; });
   handle.cancel(); assert.equal(result.code, 'ALIGN4_CANCELLED');
+});
+
+test('an edit while padding stops an ordinary (non-SuperPNG) export before writing', async t => {
+  let edited = false;
+  const s = setup(t, {describe: (n, meta) => Object.assign({}, meta, {revision: edited ? '11' : '10'})});
+  const realPad = png.pad;
+  png.pad = (...args) => { const out = realPad(...args); edited = true; return out; };
+  t.after(() => { png.pad = realPad; });
+  const r = await s.run({scope: 'canvas', meta: Object.assign({}, s.meta, {width: 5, height: 3}), superPNG: false});
+  assert.match(r.error.message, /补边期间被编辑/);
+  assert.deepEqual(fs.readdirSync(r.dir), []);
+});
+
+test('without history IDs, edit notifications received during the export stop it', async t => {
+  let edits = 4;
+  const s = setup(t, {meta: {revision: null}, describe: (n, meta) => { if (n === 1) { edits++; } return meta; }});
+  const r = await s.run({editsAtStart: 4, edits: () => edits});
+  assert.match(r.error.message, /期间被编辑/);
+  assert.deepEqual(fs.readdirSync(r.dir), []);
+});
+
+test('without history IDs and without edits, the export still succeeds', async t => {
+  const s = setup(t, {meta: {revision: null}});
+  const r = await s.run({editsAtStart: 4, edits: () => 4});
+  assert.ifError(r.error);
+});
+
+test('with history IDs, the edit count is not used (unrelated notifications do not fail exports)', async t => {
+  let edits = 4;
+  const s = setup(t, {describe: (n, meta) => { edits++; return meta; }});
+  const r = await s.run({editsAtStart: 4, edits: () => edits});
+  assert.ifError(r.error);
 });
