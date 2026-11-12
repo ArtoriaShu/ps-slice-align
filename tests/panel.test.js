@@ -287,3 +287,15 @@ test('an approximate size from the layer bounds shows on selection; the exact si
   await until(() => p.nodes.sizeSource.textContent === '5 × 3', 3000);
   assert.equal(p.nodes.sizeTarget.textContent, '8 × 4');
 });
+
+test('an empty name exports with the layer name, which shows as the placeholder', async t => {
+  const p = boot(t);
+  await until(() => p.exportButton() && !p.exportButton().disabled);
+  p.nodes.exportName.value = ''; p.nodes.exportName.fire('input'); await wait(20);
+  assert.equal(p.nodes.exportName.placeholder, '按钮');
+  assert.equal(p.exportButton().disabled, false);
+  assert.equal(p.nodes.fileName.textContent, '按钮.png');
+  p.exportButton().fire('click');
+  await until(() => fs.readdirSync(p.out).length === 1);
+  assert.deepEqual(fs.readdirSync(p.out), ['按钮.png']);
+});

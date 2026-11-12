@@ -45,20 +45,33 @@ var Align4v2 = (function () {
     function number(desc, key) { try { return desc.getUnitDoubleValue(sid(key)); } catch (e) { return desc.getDouble(sid(key)); } }
     // Approximate size from the layer bounds (or artboard rectangle): instant, no Generator.
     // The exact size still comes from the exported PNG.
-    function estimate(result) {
+    // Cheap, but guarded for very large documents: computed once per object + history
+    // state (the panel polls every ~1.2s), and switched off for a document whose first
+    // lookups turn out slow.
+    var estimateCache = {key: null, w: 0, h: 0}, slowDocs = {};
+    function estimate(result, rev) {
+        if (slowDocs[result.docId]) { result.estSkipped = true; return; }
+        var key = result.token + '|' + rev;
+        if (estimateCache.key === key) { if (estimateCache.w) { result.estWidth = estimateCache.w; result.estHeight = estimateCache.h; } return; }
+        var started = new Date().getTime(), w = 0, h = 0;
         try {
             var rect = result.kind === '画板' ? property('artboard').getObjectValue(sid('artboard')).getObjectValue(sid('artboardRect'))
                                               : property('bounds').getObjectValue(sid('bounds'));
-            var w = Math.round(number(rect, 'right') - number(rect, 'left')), h = Math.round(number(rect, 'bottom') - number(rect, 'top'));
-            if (w > 0 && h > 0) { result.estWidth = w; result.estHeight = h; }
+            w = Math.round(number(rect, 'right') - number(rect, 'left')); h = Math.round(number(rect, 'bottom') - number(rect, 'top'));
         } catch (e) {}
+        var ms = new Date().getTime() - started;
+        if (ms > 250) { slowDocs[result.docId] = true; result.estSkipped = true; result.estMs = ms; return; }
+        if (!(w > 0 && h > 0)) { w = 0; h = 0; }
+        estimateCache = {key: key, w: w, h: h};
+        if (w) { result.estWidth = w; result.estHeight = h; }
     }
     function meta() {
         var result = token(); result.name = property('name').getString(sid('name'));
         result.kind = property('layerSection').getEnumerationValue(sid('layerSection')) === sid('layerSectionStart') ? '图层组' : '图层';
         try { var a = property('artboardEnabled'); if (a.hasKey(sid('artboardEnabled')) && a.getBoolean(sid('artboardEnabled'))) { result.kind = '画板'; } } catch (e) {}
-        estimate(result);
-        result.revision = revision(); result.ok = true; return result;
+        result.revision = revision();
+        estimate(result, result.revision);
+        result.ok = true; return result;
     }
     function selectionToken() { try { var t = token(); t.ok = true; return json(t); } catch (e) { return error(e); } }
     function describeSelection() { try { return json(meta()); } catch (e) { return error(e); } }

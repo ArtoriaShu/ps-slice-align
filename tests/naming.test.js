@@ -52,9 +52,10 @@ test('selection changing while ownership is pending drops the stale draft', () =
   assert.equal(s.n.state().value, 'PS-B');
 });
 
-test('an explicitly cleared name blocks export instead of silently using the layer name', () => {
+test('an emptied name exports with the layer name', () => {
   const s = setup(); s.select('B'); s.n.edit(''); s.reply();
-  assert.match(s.resolve(s.meta('B'))().error.message, /填写导出名称/);
+  const out = s.resolve(s.meta('B'))();
+  assert.equal(out.error, null); assert.equal(out.name, 'PS-B');
 });
 
 test('reset returns to the layer name and cancels the outstanding query', () => {

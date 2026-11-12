@@ -81,7 +81,6 @@
     if (!meta) { setStatus('idle', '正在读取 Photoshop…', ''); return; }
     if (!S.directories.length) { setStatus('warn', '还没有切图目录', '在左侧“添加目录”后即可导出。'); return; }
     var nm = namer.state();
-    if (nm.edited && !M.naming.normalize(nm.value)) { setStatus('warn', '请填写导出名称', '或点击“用图层名”。'); return; }
     var dir = recentDirectory();
     setStatus('ready', '就绪', '点击目录右侧的“导出”' + (dir ? '，或在名称框按 Enter 导出到「' + dir.name + '」' : '') + '。');
   }
@@ -229,14 +228,17 @@
     if (el.exportName.value !== nm.value) { el.exportName.value = nm.value; }
     el.exportName.parentNode.className = 'field name-field' + (nm.edited ? ' custom' : '');
     el.resetName.hidden = !nm.edited; el.resetName.disabled = !!job;
-    var zh = M.naming.normalize(el.exportName.value), note = null;
+    // An empty name box means the layer name, shown as the placeholder.
+    var layerName = current ? M.naming.normalize(current.name) : '';
+    el.exportName.placeholder = layerName || '导出名称';
+    var zh = M.naming.normalize(el.exportName.value) || layerName, note = null;
     // 文件 field: prefix + name + .png. With translation on, the middle is the English and is editable.
     if (englishOverride && englishOverride.source !== zh) { englishOverride = null; } // the Chinese changed
     var auto = S.translate && current && zh ? autoEnglish(zh) : null, editing = document.activeElement === el.englishName;
     var shown = !current ? '' : !S.translate ? zh : englishOverride ? englishOverride.value : (auto ? auto.text : zh);
     setText(el.filePrefix, el.prefix.value); el.filePrefix.hidden = !el.prefix.value;
     el.englishName.readOnly = !S.translate || !current; el.englishName.disabled = !!job;
-    el.englishName.placeholder = !current ? '—' : !zh ? '请填写名称' : '';
+    el.englishName.placeholder = !current ? '—' : '';
     if (!editing && el.englishName.value !== shown) { el.englishName.value = shown; }
     el.englishReset.hidden = !englishOverride; el.englishReset.disabled = !!job;
     fitFileInput();
@@ -297,7 +299,7 @@
     setText(el.directoryCount, S.directories.length);
     var recent = recentDirectory(), blocked = !!job || choosingFolder;
     var nm = namer.state();
-    var cannot = !current ? '没有可导出的对象' : (nm.edited && !M.naming.normalize(nm.value)) ? '请先填写导出名称' : !minSize().ok ? '输出尺寸无效' : '';
+    var cannot = !current ? '没有可导出的对象' : !minSize().ok ? '输出尺寸无效' : '';
     if (!S.directories.length) {
       var empty = make('div', 'empty-dest');
       empty.appendChild(make('p', null, '添加常用的切图目录，每个目录都有自己的导出按钮，点一下就导出到那里。'));
@@ -404,6 +406,7 @@
       }
       logger.info('selection', '选中 ' + meta.kind + '「' + meta.name + '」', {token: meta.token, revision: meta.revision});
     }
+    if (meta.estMs) { logger.warn('estimate', '读取图层范围用时 ' + meta.estMs + 'ms，为避免卡顿，此文档不再显示估算尺寸'); }
     namer.observe(meta);
     if (status && status.kind === 'warn' && !status.sticky) { status = null; }
     render();
@@ -639,7 +642,7 @@
     ['input', 'change', 'compositionend', 'keyup'].forEach(function (type) {
       el.englishName.addEventListener(type, function () {
         if (!S.translate || el.englishName.readOnly) { return; }
-        var zh = M.naming.normalize(el.exportName.value), v = el.englishName.value, auto = autoEnglish(zh);
+        var zh = M.naming.normalize(el.exportName.value) || (current ? M.naming.normalize(current.name) : ''), v = el.englishName.value, auto = autoEnglish(zh);
         if (auto && v === auto.text) { englishOverride = null; }
         else if (!englishOverride || englishOverride.value !== v) { englishOverride = {source: zh, value: v}; }
         renderNaming();

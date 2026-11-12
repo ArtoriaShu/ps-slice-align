@@ -61,8 +61,8 @@ exports.create = function (o) {
       if (error) { callback(new Error(error)); return; }
       if (edited && owner === meta.token) {
         var name = normalize(value);
-        if (!name) { callback(new Error('请填写导出名称。')); return; }
-        callback(null, name, true); return;
+        // An empty name simply means "use the layer name".
+        callback(null, name || normalize(meta.name) || 'image', !!name); return;
       }
       if (edited && owner !== meta.token) { edited = false; owner = null; }
       lastMeta = meta; source = sourceOf(meta); sourceToken = meta.token; value = source; emit();
