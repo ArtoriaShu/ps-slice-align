@@ -108,7 +108,7 @@
     if (!meta) {
       setText(el.objectKind, '未选择');
       setText(el.objectName, trackerError || '在 Photoshop 中选择一个对象');
-      setText(el.sizeSource, '— × —'); setText(el.sizeTarget, '— × —'); setText(el.objectHint, ''); el.objectHint.className = 'hint';
+      setText(el.sizeSource, '— × —'); setText(el.sizeTarget, '— × —'); setText(el.objectHint, ''); el.objectHint.title = ''; el.objectHint.className = 'hint';
       return;
     }
     setText(el.objectKind, meta.kind); setText(el.objectName, meta.name); el.objectName.title = meta.name;
@@ -130,7 +130,7 @@
       hint = locked ? '已固定输出尺寸；图像比它大时按图像尺寸补齐，不会缩小。' : '实际像素尺寸在导出时由 Photoshop 生成的 PNG 测得。';
     }
     if (!min.ok) { hint = '尺寸需为 1–30000 的整数。'; warn = true; }
-    setText(el.objectHint, hint); el.objectHint.className = 'hint' + (warn ? ' warn' : '');
+    setText(el.objectHint, hint); el.objectHint.title = hint; el.objectHint.className = 'hint' + (warn ? ' warn' : '');
   }
 
   function renderNaming() {
