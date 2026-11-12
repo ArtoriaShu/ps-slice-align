@@ -25,42 +25,66 @@
 
   </div>
   <main class="settings">
-   <section class="group">
-    <div class="group-head"><h2>切图名</h2>
-     <button id="openGlossary" class="link-button" title="打开“我的术语表”，可以自己添加或修改译法">术语表</button>
-     <label class="toggle-row small translate-toggle" title="把名称框里的中文离线翻译成英文：我的术语表 → 内置术语表 → 离线词典；查不到的保留中文"><input id="translate" type="checkbox"><span class="toggle" aria-hidden="true"></span><span>翻译成英文</span></label></div>
-    <div class="name-row">
-     <div class="field prefix-field"><input id="prefix" type="text" maxlength="32" placeholder="前缀" autocomplete="off" spellcheck="false" aria-label="文件名前缀"><button id="clearPrefix" class="field-clear" title="清空前缀" aria-label="清空前缀">×</button></div>
-     <div class="field name-field"><input id="exportName" type="text" maxlength="120" placeholder="导出名称" autocomplete="off" spellcheck="false" aria-label="导出名称" title="按 Enter 导出到最近使用的目录"><button id="resetName" class="field-action" title="恢复为当前图层名" hidden>用图层名</button></div>
-    </div>
-    <div id="englishRow" class="english-row" hidden>
-     <div class="english-box">
-      <div id="englishAuto" class="english-auto" tabindex="0" title="导出的文件名。点击修改英文"></div>
-      <textarea id="englishName" class="english-input" rows="2" maxlength="120" autocomplete="off" spellcheck="false" hidden aria-label="英文切图名" title="按 Enter 导出到最近使用的目录；Esc 恢复自动翻译"></textarea>
-     </div>
-     <button id="englishEdit" class="ghost-button english-button" title="直接修改英文，中文不变；导出后会记到我的术语表">修改</button>
-     <button id="englishReset" class="ghost-button english-button" hidden title="放弃修改，恢复自动翻译">恢复</button>
-    </div>
-    <p class="file-preview"><span id="fileName">—</span></p>
-    <p id="translateNote" class="translate-note" hidden></p>
-   </section>
-
-   <section class="group" id="sizeGroup">
-    <div class="group-head"><h2>输出尺寸</h2><span id="sizeHint" class="muted">留空自动补齐到 4 的倍数</span></div>
-    <div class="size-row">
-     <label class="field size-field"><span>宽</span><input id="minWidth" type="number" min="1" max="30000" step="1" placeholder="自动" aria-label="最小输出宽度"></label>
-     <span class="times">×</span>
-     <label class="field size-field"><span>高</span><input id="minHeight" type="number" min="1" max="30000" step="1" placeholder="自动" aria-label="最小输出高度"></label>
-     <button id="lockSize" class="lock-button" aria-pressed="false" title="固定后，之后的每张切图都按这个尺寸输出"><svg viewBox="0 0 14 14" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="2.5" y="6" width="9" height="6.5" rx="1.3"/><path class="shackle" d="M4.5 6V4.3a2.5 2.5 0 0 1 5 0V6"/></svg><span>固定</span></button>
-     <div class="segmented small anchor-switch" role="radiogroup" aria-label="补边位置">
-      <button id="anchorCenter" role="radio" title="透明边均匀分布在四周">居中</button><button id="anchorTopLeft" role="radio" title="透明边只加在右侧和下方">左上</button>
+   <!-- One form: a short label on the left of every row, controls on the right. -->
+   <div class="form">
+    <div class="form-row">
+     <label class="form-label" for="exportName">名称</label>
+     <div class="form-control name-row">
+      <div class="field prefix-field"><input id="prefix" type="text" maxlength="32" placeholder="前缀" autocomplete="off" spellcheck="false" aria-label="文件名前缀"><button id="clearPrefix" class="field-clear" title="清空前缀" aria-label="清空前缀">×</button></div>
+      <div class="field name-field"><input id="exportName" type="text" maxlength="120" placeholder="导出名称" autocomplete="off" spellcheck="false" aria-label="导出名称" title="按 Enter 导出到最近使用的目录"><button id="resetName" class="field-action" title="恢复为当前图层名" hidden>用图层名</button></div>
      </div>
     </div>
-   </section>
 
-   <label class="toggle-row" title="补边后调用已安装的 SuperPNG 重新编码；失败时不会改存普通 PNG">
-    <input id="superPNG" type="checkbox"><span class="toggle" aria-hidden="true"></span><span>切图使用 SuperPNG 编码</span><span class="muted">需先安装 SuperPNG</span>
-   </label>
+    <div class="form-row">
+     <span class="form-label">文件</span>
+     <div class="form-control">
+      <div id="englishRow" class="file-row">
+       <div class="english-box">
+        <div id="fileName" class="file-box" title="导出的文件名">—</div>
+        <div id="englishAuto" class="english-auto" tabindex="0" hidden title="导出的文件名。点击修改英文"></div>
+        <textarea id="englishName" class="english-input" rows="2" maxlength="120" autocomplete="off" spellcheck="false" hidden aria-label="英文切图名" title="按 Enter 导出到最近使用的目录；Esc 恢复自动翻译"></textarea>
+       </div>
+       <button id="englishEdit" class="ghost-button english-button" hidden title="直接修改英文，中文不变；导出后会记到我的术语表">修改</button>
+       <button id="englishReset" class="ghost-button english-button" hidden title="放弃修改，恢复自动翻译">恢复</button>
+      </div>
+      <p id="translateNote" class="translate-note" hidden></p>
+     </div>
+    </div>
+
+    <div class="form-row" id="sizeGroup">
+     <span class="form-label">尺寸</span>
+     <div class="form-control size-row">
+      <label class="field size-field"><span>宽</span><input id="minWidth" type="number" min="1" max="30000" step="1" placeholder="自动" aria-label="最小输出宽度" title="留空：按实际尺寸自动补齐到 4 的倍数"></label>
+      <span class="times">×</span>
+      <label class="field size-field"><span>高</span><input id="minHeight" type="number" min="1" max="30000" step="1" placeholder="自动" aria-label="最小输出高度" title="留空：按实际尺寸自动补齐到 4 的倍数"></label>
+      <button id="lockSize" class="lock-button" aria-pressed="false" title="固定后，之后的每张切图都按这个尺寸输出"><svg viewBox="0 0 14 14" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="2.5" y="6" width="9" height="6.5" rx="1.3"/><path class="shackle" d="M4.5 6V4.3a2.5 2.5 0 0 1 5 0V6"/></svg><span>固定</span></button>
+     </div>
+    </div>
+
+    <div class="form-row">
+     <span class="form-label">补边</span>
+     <div class="form-control inline">
+      <div class="segmented anchor-switch" role="radiogroup" aria-label="补边位置">
+       <button id="anchorCenter" role="radio">居中</button><button id="anchorTopLeft" role="radio">左上</button>
+      </div>
+      <span id="anchorHint" class="inline-hint"></span>
+     </div>
+    </div>
+
+    <div class="form-row">
+     <span class="form-label">选项</span>
+     <div class="form-control options">
+      <div class="option-line">
+       <label class="toggle-row" title="把名称里的中文离线翻译成英文：我的术语表 → 内置术语表 → 离线词典；查不到的保留中文"><input id="translate" type="checkbox"><span class="toggle" aria-hidden="true"></span><span>翻译成英文</span></label>
+       <button id="openGlossary" class="link-button" title="打开“我的术语表”，可以自己添加或修改译法">术语表</button>
+      </div>
+      <div class="option-line">
+       <label class="toggle-row" title="补边后调用已安装的 SuperPNG 重新编码；失败时不会改存普通 PNG"><input id="superPNG" type="checkbox"><span class="toggle" aria-hidden="true"></span><span>SuperPNG 编码</span></label>
+       <span class="inline-hint">需先安装 SuperPNG</span>
+      </div>
+     </div>
+    </div>
+   </div>
   </main>
 
   <aside class="destinations" aria-label="导出目录">

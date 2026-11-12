@@ -7,7 +7,7 @@
     superpng: 'SuperPNG 编码', write: '写入文件', done: '完成'};
 
   var ids = ['openLog', 'objectKind', 'refresh', 'objectName', 'sizeSource', 'sizeTarget', 'objectHint',
-    'resetName', 'translate', 'openGlossary', 'translateNote', 'englishRow', 'englishAuto', 'englishName', 'englishEdit', 'englishReset', 'sizeHint', 'lockSize', 'prefix', 'clearPrefix', 'exportName', 'fileName', 'sizeGroup', 'minWidth', 'minHeight', 'anchorCenter', 'anchorTopLeft',
+    'resetName', 'translate', 'openGlossary', 'translateNote', 'englishRow', 'englishAuto', 'englishName', 'englishEdit', 'englishReset', 'anchorHint', 'lockSize', 'prefix', 'clearPrefix', 'exportName', 'fileName', 'sizeGroup', 'minWidth', 'minHeight', 'anchorCenter', 'anchorTopLeft',
     'superPNG', 'directoryCount', 'addDirectory', 'directoryList', 'statusbar', 'statusTitle', 'statusDetail', 'statusOpen', 'statusLog',
     'cancelJob', 'canvasIcon', 'canvasDirName', 'canvasDirPath', 'canvasLast', 'canvasFolder', 'canvasSuperPNG', 'canvasExport', 'logPanel', 'logVerbose', 'logCopy', 'logFolder', 'logClose', 'logList', 'logNote', 'version', 'restoreSize', 'debug'];
   var el = {};
@@ -214,7 +214,6 @@
     el.resetName.hidden = !nm.edited; el.resetName.disabled = !!job;
     var zh = M.naming.normalize(el.exportName.value), note = null;
     // English row (translation on): automatic English with source marks, or the user's own English.
-    el.englishRow.hidden = !S.translate;
     if (englishOverride && englishOverride.source !== zh) { englishOverride = null; } // the Chinese changed
     if (S.translate) {
       var auto = current && zh ? autoEnglish(zh) : null, overriding = !!englishOverride;
@@ -236,8 +235,11 @@
         el.englishAuto.appendChild(make('wbr')); el.englishAuto.appendChild(make('span', 'fixed', '.png'));
         note = counts.dict || counts.none ? counts : null;
       } else { el.englishAuto.appendChild(make('span', 'empty', translatorError ? '翻译数据加载失败' : '—')); }
+    } else {
+      englishOverride = null;
+      el.englishAuto.hidden = true; el.englishName.hidden = true; el.englishEdit.hidden = true; el.englishReset.hidden = true;
     }
-    el.fileName.parentNode.hidden = S.translate; // with translation on, the English box is the file name
+    el.fileName.hidden = S.translate; // with translation on, the English box is the file name
     clear(el.fileName);
     if (!current) { el.fileName.textContent = '—'; }
     else if (!zh) { el.fileName.appendChild(make('span', 'warn', '请填写导出名称')); }
@@ -375,10 +377,8 @@
     el.lockSize.setAttribute('aria-pressed', String(S.sizeLocked));
     el.lockSize.disabled = busy || (!S.sizeLocked && !lockable);
     el.lockSize.title = S.sizeLocked ? '已固定：之后每张切图都按这个尺寸输出。点击解除' : lockable ? '固定后，之后的每张切图都按这个尺寸输出' : '先填写宽或高，再点固定';
-    el.sizeGroup.className = 'group' + (S.sizeLocked ? ' size-locked' : '');
-    setText(el.sizeHint, S.sizeLocked ? '已固定，切换对象后保持不变' : '留空自动补齐；填写的尺寸只用于当前对象');
-    el.sizeHint.title = el.sizeHint.textContent;
-    el.sizeHint.className = 'muted' + (S.sizeLocked ? ' locked' : '');
+    el.sizeGroup.className = 'form-row' + (S.sizeLocked ? ' size-locked' : '');
+    setText(el.anchorHint, S.anchor === 'topLeft' ? '透明边只加在右侧和下方' : '透明边平均分布在四周');
     el.anchorCenter.disabled = busy; el.anchorTopLeft.disabled = busy;
     el.anchorCenter.setAttribute('aria-checked', String(S.anchor === 'center'));
     el.anchorTopLeft.setAttribute('aria-checked', String(S.anchor === 'topLeft'));
