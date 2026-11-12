@@ -155,6 +155,12 @@
   function runningButton(btn) { clear(btn); btn.innerHTML = '<span class="spinner"></span>'; btn.appendChild(document.createTextNode(seconds(now() - job.started))); btn.disabled = true; }
 
   function renderDirectories() {
+    // The list is rebuilt on every refresh (selection changes, every 0.5s while
+    // exporting): keep its scroll position and any name being edited.
+    var scroll = el.directoryList.scrollTop, active = document.activeElement, editing = null;
+    if (active && active.className === 'dest-name' && active.getAttribute) {
+      editing = {id: active.getAttribute('data-id'), value: active.value, start: active.selectionStart, end: active.selectionEnd};
+    }
     clear(el.directoryList);
     setText(el.directoryCount, S.directories.length);
     var recent = recentDirectory(), blocked = !!job || choosingFolder;
@@ -173,7 +179,7 @@
       var row = make('div', 'dest' + (d === recent ? ' recent' : '') + (running ? ' running' : '') + (exists ? '' : ' missing'));
       var icon = make('span', 'dest-icon'); icon.innerHTML = FOLDER_SVG;
       var main = make('div', 'dest-main');
-      var name = make('input', 'dest-name'); name.type = 'text'; name.value = d.name; name.title = '点击修改显示名称'; name.disabled = blocked; name.setAttribute('aria-label', '目录名称');
+      var name = make('input', 'dest-name'); name.type = 'text'; name.value = d.name; name.setAttribute('data-id', d.id); name.title = '点击修改显示名称'; name.disabled = blocked; name.setAttribute('aria-label', '目录名称');
       name.addEventListener('change', function () { d.name = name.value.trim() || M.settings.basename(d.path); name.value = d.name; persist(); });
       name.addEventListener('keydown', function (e) { if (e.keyCode === 13) { name.blur(); } });
       var path = make('p', 'dest-path', exists ? d.path : '目录不存在：' + d.path); path.title = d.path;
@@ -192,7 +198,12 @@
       remove.addEventListener('click', function () { removeDirectory(d); });
       row.appendChild(icon); row.appendChild(main); row.appendChild(btn); row.appendChild(remove);
       el.directoryList.appendChild(row);
+      if (editing && editing.id === d.id && !name.disabled) {
+        name.value = editing.value; name.focus();
+        try { name.setSelectionRange(editing.start, editing.end); } catch (e) {}
+      }
     });
+    el.directoryList.scrollTop = scroll;
   }
 
   function renderCanvas() {
