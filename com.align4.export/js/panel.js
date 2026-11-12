@@ -7,7 +7,7 @@
     superpng: 'SuperPNG 编码', write: '写入文件', done: '完成'};
 
   var ids = ['openLog', 'objectKind', 'refresh', 'objectName', 'sizeSource', 'sizeTarget', 'objectHint',
-    'resetName', 'sizeHint', 'lockSize', 'prefix', 'clearPrefix', 'exportName', 'fileName', 'sizeGroup', 'minWidth', 'minHeight', 'anchorCenter', 'anchorTopLeft',
+    'resetName', 'translate', 'openGlossary', 'translateNote', 'sizeHint', 'lockSize', 'prefix', 'clearPrefix', 'exportName', 'fileName', 'sizeGroup', 'minWidth', 'minHeight', 'anchorCenter', 'anchorTopLeft',
     'superPNG', 'directoryCount', 'addDirectory', 'directoryList', 'statusbar', 'statusTitle', 'statusDetail', 'statusOpen', 'statusLog',
     'cancelJob', 'canvasIcon', 'canvasDirName', 'canvasDirPath', 'canvasLast', 'canvasFolder', 'canvasSuperPNG', 'canvasExport', 'logPanel', 'logVerbose', 'logCopy', 'logFolder', 'logClose', 'logList', 'logNote', 'version', 'restoreSize', 'debug'];
   var el = {};
@@ -85,6 +85,62 @@
     setStatus('ready', '就绪', '点击目录右侧的“导出”' + (dir ? '，或在名称框按 Enter 导出到「' + dir.name + '」' : '') + '。');
   }
 
+  // ---------- Translation ----------
+  var translator = null, translatorError = null, userCache = {mtime: -1, map: {}};
+  function userGlossaryPath() { return M.path.join(M.env.APPDATA || M.os.tmpdir(), 'Align4Export', '我的术语表.csv'); }
+  // Excel on Chinese Windows often saves CSV as GBK unless "CSV UTF-8" is chosen.
+  function decodeText(buffer) {
+    var text = buffer.toString('utf8');
+    if (text.indexOf('\ufffd') >= 0 && window.TextDecoder) { try { text = new window.TextDecoder('gbk').decode(new Uint8Array(buffer)); } catch (e) {} }
+    return text;
+  }
+  function userGlossary() {
+    var p = userGlossaryPath();
+    try {
+      var st = M.fs.statSync(p);
+      if (st.mtimeMs !== userCache.mtime) { userCache = {mtime: st.mtimeMs, map: M.translate.loadGlossary(decodeText(M.fs.readFileSync(p)))}; }
+    } catch (e) { userCache = {mtime: -1, map: {}}; }
+    return userCache.map;
+  }
+  function getTranslator() {
+    if (translator || translatorError) { return translator; }
+    try {
+      var builtin = M.translate.loadGlossary(M.readData('glossary.csv'));
+      var dict = JSON.parse(M.readData('dict.json')).words;
+      translator = M.translate.create({user: userGlossary, builtin: builtin, dict: dict});
+      logger.info('translate', '翻译已加载：内置术语 ' + Object.keys(builtin).length + ' 条，离线词典 ' + Object.keys(dict).length + ' 条');
+    } catch (e) { translatorError = String(e.message || e); logger.error('translate', '翻译数据加载失败：' + translatorError); }
+    return translator;
+  }
+  function translateName(name) { var t = S.translate && getTranslator(); return t ? t.translate(name).text : name; }
+  function ensureUserGlossary() {
+    var p = userGlossaryPath();
+    if (M.fs.existsSync(p)) { return p; }
+    (function make(dir) { if (!M.fs.existsSync(dir)) { make(M.path.dirname(dir)); M.fs.mkdirSync(dir); } }(M.path.dirname(p)));
+    M.fs.writeFileSync(p, '\ufeff' + ['中文,英文,备注', '# 我的术语表：优先于内置术语表。英文填 - 表示去掉这个词。导出前改过的译法会自动记到这里。,,',
+      '# 用 Excel 编辑后请另存为“CSV UTF-8”。,,'].join('\r\n') + '\r\n', 'utf8');
+    return p;
+  }
+  // Remember corrections: update an existing row or add a new one under the header.
+  function rememberTranslations(pairs) {
+    if (!pairs.length) { return 0; }
+    var p = ensureUserGlossary(), rows = M.translate.parseCSV(decodeText(M.fs.readFileSync(p))), changed = 0;
+    pairs.forEach(function (pair) {
+      var hit = null;
+      rows.forEach(function (r) { if (!hit && String(r[0] || '').trim() === pair[0]) { hit = r; } });
+      if (hit) { if (hit[1] !== pair[1]) { hit[1] = pair[1]; hit[2] = '导出时修改'; changed++; } }
+      else {
+        var at = 0; while (at < rows.length && (rows[at][0] === '中文' || String(rows[at][0] || '').charAt(0) === '#')) { at++; }
+        rows.splice(at, 0, [pair[0], pair[1], '导出时修改']); changed++;
+      }
+    });
+    if (changed) {
+      M.fs.writeFileSync(p, '\ufeff' + rows.filter(function (r) { return r.length && r.join('') !== ''; }).map(M.translate.csvLine).join('\r\n') + '\r\n', 'utf8');
+      userCache.mtime = -1;
+    }
+    return changed;
+  }
+
   // ---------- Rendering ----------
   function recentDirectory() {
     var best = null;
@@ -142,12 +198,36 @@
     if (el.exportName.value !== nm.value) { el.exportName.value = nm.value; }
     el.exportName.parentNode.className = 'field name-field' + (nm.edited ? ' custom' : '');
     el.resetName.disabled = !nm.edited || !!job;
-    var name = M.naming.normalize(el.exportName.value);
+    el.resetName.textContent = S.translate ? '用自动译名' : '用图层名';
+    var name = M.naming.normalize(el.exportName.value), note = null;
     clear(el.fileName);
     if (!current) { el.fileName.textContent = '—'; }
     else if (!name) { el.fileName.appendChild(make('span', 'warn', '请填写导出名称')); }
+    else if (S.translate && !nm.edited && getTranslator()) {
+      // Show where each word came from: dictionary guesses and untranslated words are marked.
+      var tr = translator.translate(M.naming.normalize(current.name)), counts = {dict: 0, none: 0};
+      if (el.prefix.value) { el.fileName.appendChild(document.createTextNode(M.outputFiles.baseName(el.prefix.value))); }
+      tr.parts.forEach(function (p, i) {
+        if (i) { el.fileName.appendChild(document.createTextNode('_')); }
+        var span = make('span', p.source === 'dict' || p.source === 'none' ? 'part-' + p.source : null, p.out);
+        span.title = p.src + ' → ' + p.out + '（' + ({user: '我的术语表', builtin: '内置术语表', dict: '离线词典，建议核对', none: '没有找到译法', ascii: '原文'}[p.source]) + '）';
+        if (counts[p.source] != null) { counts[p.source]++; }
+        el.fileName.appendChild(span);
+      });
+      el.fileName.appendChild(document.createTextNode('.png'));
+      note = counts.dict || counts.none ? counts : null;
+    }
     else { el.fileName.textContent = M.outputFiles.nameFor(el.prefix.value, name) + '.png'; }
     el.fileName.title = (el.fileName.textContent || '') + '（同名文件不会覆盖，自动追加 -2、-3…）';
+    // The note line is reserved while translation is on, so the layout never jumps.
+    clear(el.translateNote); el.translateNote.hidden = !S.translate;
+    if (note) {
+      if (note.dict) { el.translateNote.appendChild(make('i', 'k-dict', '黄色 ' + note.dict + ' 个来自离线词典，建议核对')); }
+      if (note.dict && note.none) { el.translateNote.appendChild(document.createTextNode('；')); }
+      if (note.none) { el.translateNote.appendChild(make('i', 'k-none', '红色 ' + note.none + ' 个没找到，保留中文')); }
+      el.translateNote.appendChild(document.createTextNode('。直接改名称再导出，会记到我的术语表。'));
+    }
+    el.translate.checked = S.translate;
     el.clearPrefix.hidden = !el.prefix.value;
   }
 
@@ -341,6 +421,7 @@
       namer.resolve(meta, function (error, name, custom) {
         if (job !== mine) { return; }
         if (error) { end(mine, error); return; }
+        mine.naming = {source: M.naming.normalize(meta.name), name: name, custom: custom};
         logger.info('export.object', meta.kind + '「' + meta.name + '」，文件名 ' + M.outputFiles.nameFor(S.prefix, name) + '.png' + (custom ? '（自定义）' : ''), {token: meta.token, revision: meta.revision}, job.id);
         runPipeline(meta, name, min);
       });
@@ -357,7 +438,7 @@
     host('Align4.describeDocument()', function (meta) {
       if (job !== mine) { return; }
       if (!meta.ok) { end(mine, new Error(meta.message)); return; }
-      var name = M.naming.normalize(meta.name) || 'canvas';
+      var name = M.naming.normalize(translateName(M.naming.normalize(meta.name))) || 'canvas';
       logger.info('export.object', '文档「' + meta.name + '」' + meta.width + '×' + meta.height + '，文件名 ' + M.outputFiles.nameFor(S.prefix, name) + '.png', {token: meta.token, revision: meta.revision}, job.id);
       runPipeline(meta, name, {width: 0, height: 0});
     });
@@ -400,10 +481,18 @@
       t.setLast({ok: true, time: now(), file: file, width: record.width, height: record.height}); persist();
       lastResult = record;
       logger.info('export.end', '成功，总用时 ' + took, {file: record.file}, finished.id);
+      var learned = 0;
+      if (S.translate && finished.naming && finished.naming.custom && getTranslator()) {
+        try {
+          var pairs = translator.learn(finished.naming.source, finished.naming.name);
+          learned = rememberTranslations(pairs);
+          if (learned) { logger.info('translate', '记住 ' + learned + ' 条译法', {pairs: pairs}, finished.id); namer.retransform(); }
+        } catch (e) { logger.warn('translate', '保存译法失败：' + String(e.message || e)); }
+      }
       var padded = record.width !== record.originalWidth || record.height !== record.originalHeight;
       var over = finished.scope === 'selection' && finished.locked && oversize({width: record.originalWidth, height: record.originalHeight}, finished.min);
       status = {kind: over ? 'warn' : 'ok', title: (finished.scope === 'canvas' ? '整图已导出 ' : '已导出 ') + file + (over ? '（图像大于固定尺寸）' : ''), detail: record.width + ' × ' + record.height + (padded ? '（原 ' + record.originalWidth + ' × ' + record.originalHeight + '）' : '') +
-        ' · ' + record.encoder + ' · ' + took + ' · ' + t.label, open: true, sticky: true};
+        ' · ' + record.encoder + ' · ' + took + ' · ' + t.label + (learned ? ' · 已记住 ' + learned + ' 条译法' : ''), open: true, sticky: true};
     }
     tracker.resume(); tracker.refresh();
     render(); renderStatus();
@@ -509,6 +598,16 @@
   // ---------- Events ----------
   function bind() {
     el.canvasFolder.addEventListener('click', function () { chooseCanvasFolder(); });
+    el.translate.addEventListener('change', function () {
+      S.translate = !!el.translate.checked; persist();
+      logger.info('setting', '翻译成英文 ' + (S.translate ? '开启' : '关闭'));
+      if (S.translate && !getTranslator()) { setStatus('error', '翻译数据加载失败', translatorError || ''); }
+      namer.retransform(); render();
+    });
+    el.openGlossary.addEventListener('click', function () {
+      try { var p = ensureUserGlossary(); host('Align4.openFile(' + quote(p) + ')', function (r) { if (!r.ok) { setStatus('error', '无法打开术语表', r.message + ' ' + p); } }); }
+      catch (e) { setStatus('error', '无法创建术语表', String(e.message || e)); }
+    });
     el.canvasExport.addEventListener('click', function () { if (job && job.target.id === 'canvas') { cancelCurrent(); } else { exportCanvas(); } });
     el.canvasDirPath.addEventListener('click', function () { if (S.canvasDirectory && directoryExists(S.canvasDirectory)) { openFolder(S.canvasDirectory); } });
     el.canvasSuperPNG.addEventListener('change', function () { S.canvasSuperPNG = !!el.canvasSuperPNG.checked; persist(); logger.info('setting', '整图 SuperPNG ' + (S.canvasSuperPNG ? '开启' : '关闭')); render(); });
@@ -553,7 +652,7 @@
     });
     el.resetName.addEventListener('click', function () { namer.reset(); el.exportName.value = namer.state().value; render(); });
     document.addEventListener('visibilitychange', function () { if (!document.hidden && tracker) { tracker.poke(); } });
-    window.addEventListener('focus', function () { existsCache = {}; if (tracker) { tracker.poke(); } });
+    window.addEventListener('focus', function () { existsCache = {}; if (S.translate && translator) { namer.retransform(); } if (tracker) { tracker.poke(); } });
     window.addEventListener('beforeunload', cleanup);
     window.addEventListener('error', function (e) { if (logger) { logger.error('script', '面板脚本错误：' + (e && e.message), {file: e && e.filename, line: e && e.lineno, stack: e && e.error && e.error.stack}); } });
   }
@@ -595,7 +694,8 @@
     var env = {}; try { env = rq('process').env || {}; } catch (e) {}
     return {fs: rq('fs'), path: path, os: rq('os'), env: env, rules: mod('rules'), png: mod('png-padding'), outputFiles: mod('output-files'),
       superPNG: mod('superpng'), nativeExport: mod('native-export'), exportJob: mod('export-job'), logger: mod('logger'),
-      diagnostics: mod('diagnostics'), naming: mod('naming'), selection: mod('selection'), settings: mod('settings')};
+      diagnostics: mod('diagnostics'), naming: mod('naming'), selection: mod('selection'), settings: mod('settings'), translate: mod('translate'),
+      readData: function (name) { return rq('fs').readFileSync(path.join(base, 'data', name), 'utf8'); }};
   }
 
   function start() {
@@ -622,6 +722,7 @@
 
     namer = M.naming.create({
       query: function (cb) { host('Align4.selectionToken()', cb); },
+      transform: translateName,
       onChange: function () { if (M && S) { renderNaming(); renderDirectories(); if (!job && status && (status.kind === 'ready' || status.kind === 'warn') && !status.sticky) { idleStatus(); } } },
       onOwnerResolved: function () { if (tracker) { tracker.poke(); } }
     });

@@ -10,6 +10,7 @@ Photoshop 切图导出插件，自动将 PNG 宽高向上补齐至 4 的倍数�
 - 宽高向上补齐到 4 的倍数，也可指定尺寸并“固定”，之后每张切图都按该尺寸输出；透明补边可居中或靠左上。
 - 常用目录列表：每个目录有自己的导出按钮，点哪个导出到哪个。
 - 自定义名称和前缀；同名文件自动编号，不覆盖已有文件。
+- 离线把中文图层名翻译成英文切图名（我的术语表 → 内置 UI 术语表 → CC-CEDICT 离线词典，查不到保留中文），改过的译法会自动记住。
 - 可选 SuperPNG 编码。
 - 大 PSD 或 Generator 没响应时自动重发导出命令，状态栏显示实时进度，可取消。
 - 运行日志与一键“复制诊断信息”（含 Photoshop Generator 日志末尾），方便反馈问题。
@@ -40,6 +41,10 @@ Photoshop 切图导出插件，自动将 PNG 宽高向上补齐至 4 的倍数�
 - `com.align4.export/`：CEP 插件源码与配置，安装时请保持目录结构完整。
 - `install.bat` / `install.ps1`：Windows 安装脚本。
 - `uninstall.bat` / `uninstall.ps1`：Windows 卸载脚本。
+
+## 第三方数据
+
+离线词典 `com.align4.export/data/dict.json` 由 [CC-CEDICT](https://www.mdbg.net/chinese/dictionary?page=cc-cedict) 生成，按 [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) 授权，详见 `com.align4.export/data/README.txt`。
 
 ## 开发
 

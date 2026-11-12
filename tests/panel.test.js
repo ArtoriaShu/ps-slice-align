@@ -216,3 +216,22 @@ test('the clicked directory button turns into a cancel button while exporting', 
   await until(() => /已取消/.test(p.nodes.statusTitle.textContent), 500);
   await wait(400); assert.deepEqual(fs.readdirSync(p.out), []);
 });
+
+test('translation: English file names, colour-marked guesses, and corrections are remembered', async t => {
+  const appdata = fs.mkdtempSync(path.join(os.tmpdir(), 'align4-test-appdata-'));
+  process.env.APPDATA = appdata; t.after(() => { delete process.env.APPDATA; fs.rmSync(appdata, {recursive: true, force: true}); });
+  const p = boot(t, {settings: {translate: true}});
+  p.select({token: '1|8|1', name: '头像闪光', kind: '图层', revision: '3'});
+  await until(() => p.nodes.exportName.value === 'avatar_flash');
+  assert.match(p.nodes.translateNote.children.map(c => c.textContent).join(''), /离线词典/);
+  p.nodes.exportName.value = 'avatar_shine'; p.nodes.exportName.fire('input');
+  await wait(20);
+  p.exportButton().fire('click');
+  await until(() => fs.readdirSync(p.out).length === 1);
+  assert.deepEqual(fs.readdirSync(p.out), ['avatar_shine.png']);
+  const glossary = path.join(appdata, 'Align4Export', '我的术语表.csv');
+  await until(() => fs.existsSync(glossary));
+  assert.match(fs.readFileSync(glossary, 'utf8'), /闪光,shine/);
+  p.select({token: '1|9|1', name: '按钮闪光', kind: '图层', revision: '3'});
+  await until(() => p.nodes.exportName.value === 'btn_shine');
+});

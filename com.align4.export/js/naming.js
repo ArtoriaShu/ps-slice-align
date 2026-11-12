@@ -11,8 +11,10 @@ exports.normalize = normalize;
 // o: {query(callback(meta)) -> asks Photoshop for the current selection token,
 //     onChange(state)        -> field text should be refreshed,
 //     onOwnerResolved()      -> a fresh selection check is worthwhile}
+//     transform(name)        -> optional, e.g. translation of the layer name}
 exports.create = function (o) {
-  var value = '', source = '', sourceToken = null, edited = false, owner = null;
+  var value = '', source = '', sourceToken = null, edited = false, owner = null, lastMeta = null;
+  function sourceOf(meta) { var n = normalize(meta.name); return normalize(o.transform ? o.transform(n) : n); }
   var seq = 0, pending = null; // pending: {seq, waiters, error}
 
   function emit() { if (o.onChange) { o.onChange(state()); } }
@@ -20,7 +22,7 @@ exports.create = function (o) {
 
   // The tracker reports the selection it sees.
   function observe(meta) {
-    sourceToken = meta.token; source = normalize(meta.name);
+    lastMeta = meta; sourceToken = meta.token; source = sourceOf(meta);
     if (edited && !pending && owner !== meta.token) { edited = false; owner = null; }
     if (!edited) { value = source; }
     emit();
@@ -63,11 +65,14 @@ exports.create = function (o) {
         callback(null, name, true); return;
       }
       if (edited && owner !== meta.token) { edited = false; owner = null; }
-      source = normalize(meta.name); sourceToken = meta.token; value = source; emit();
+      lastMeta = meta; source = sourceOf(meta); sourceToken = meta.token; value = source; emit();
       callback(null, source || 'image', false);
     }
   }
 
-  return {observe: observe, edit: edit, reset: reset, resolve: resolve, state: state,
+  // The transform changed (translation switched on/off, glossary edited): recompute the default.
+  function retransform() { if (lastMeta) { observe(lastMeta); } }
+
+  return {observe: observe, edit: edit, reset: reset, resolve: resolve, state: state, retransform: retransform,
     sourceToken: function () { return sourceToken; }};
 };

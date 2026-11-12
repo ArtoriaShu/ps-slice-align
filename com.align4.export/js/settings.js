@@ -10,7 +10,7 @@ exports.samePath = same;
 function defaults() {
   // Whole-canvas export keeps its own directory and SuperPNG switch (off by default).
   return {directories: [], prefix: '', superPNG: false, minWidth: '', minHeight: '', anchor: 'center',
-    sizeLocked: false, canvasDirectory: '', canvasSuperPNG: false, canvasLastExport: null};
+    sizeLocked: false, translate: false, canvasDirectory: '', canvasSuperPNG: false, canvasLastExport: null};
 }
 
 function basename(p) { var parts = clean(p).split(/[\\/]/); return parts[parts.length - 1] || p; }
@@ -41,7 +41,7 @@ exports.load = function (storage) {
     s.superPNG = get('align4-superpng') === '1';
   }
   if (s.anchor !== 'topLeft') { s.anchor = 'center'; }
-  s.sizeLocked = !!s.sizeLocked; s.superPNG = !!s.superPNG; s.canvasSuperPNG = !!s.canvasSuperPNG; s.canvasDirectory = typeof s.canvasDirectory === 'string' ? s.canvasDirectory : ''; s.prefix = String(s.prefix || '').slice(0, 32);
+  s.sizeLocked = !!s.sizeLocked; s.translate = !!s.translate; s.superPNG = !!s.superPNG; s.canvasSuperPNG = !!s.canvasSuperPNG; s.canvasDirectory = typeof s.canvasDirectory === 'string' ? s.canvasDirectory : ''; s.prefix = String(s.prefix || '').slice(0, 32);
   return s;
 };
 

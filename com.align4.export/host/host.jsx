@@ -122,6 +122,14 @@ var Align4 = (function () {
             return json({ok:true});
         } catch (e) { return error(e); }
     }
+    function openFile(path) {
+        try {
+            var file = new File(path);
+            if (!file.exists) { throw new Error('文件不存在。'); }
+            if (!file.execute()) { throw new Error('无法打开文件。'); }
+            return json({ok:true});
+        } catch (e) { return error(e); }
+    }
     function eventIDs() {
         var names = ['slct','move','Trnf','setd','Mk  ','Dlt ','Shw ','Hd  ','undo','redo'], result = [], i;
         for (i = 0; i < names.length; i++) { result.push({id:charIDToTypeID(names[i]), edit:names[i] !== 'slct'}); }
@@ -148,5 +156,5 @@ var Align4 = (function () {
         out.document = d;
         return json(out);
     }
-    return {selectionToken:selectionToken, describeSelection:describeSelection, describeDocument:describeDocument, startNative:startNative, startNativeCanvas:startNativeCanvas, convertSuperPNG:convertSuperPNG, chooseFolder:chooseFolder, openFolder:openFolder, eventIDs:eventIDs, diagnose:diagnose, environment:function () { try { return environment(); } catch (e) { return error(e); } }};
+    return {selectionToken:selectionToken, describeSelection:describeSelection, describeDocument:describeDocument, startNative:startNative, startNativeCanvas:startNativeCanvas, convertSuperPNG:convertSuperPNG, chooseFolder:chooseFolder, openFolder:openFolder, openFile:openFile, eventIDs:eventIDs, diagnose:diagnose, environment:function () { try { return environment(); } catch (e) { return error(e); } }};
 }());

@@ -10,6 +10,9 @@
     docOpen: true, docName: '首页改版_v3', docW: 1080, docH: 2337, revision: 41, selected: 0, scenario: 'normal', theme: 'dark',
     layers: [
       {id: 12, name: '按钮/确认', kind: '图层组', w: 478, h: 111},
+      {id: 88, name: '聊天系统/装饰图_02', kind: '图层', w: 212, h: 36},
+      {id: 89, name: '头像框_金色_选中', kind: '图层', w: 132, h: 132},
+      {id: 90, name: '活动入口_限时礼包闪光', kind: '图层组', w: 160, h: 158},
       {id: 31, name: 'icon_search', kind: '图层', w: 46, h: 46},
       {id: 7, name: 'Banner 主视觉', kind: '画板', w: 1080, h: 602},
       {id: 54, name: '卡片背景', kind: '图层', w: 327, h: 214}
@@ -47,7 +50,7 @@
         case 'eventIDs': r = {ok: true, events: []}; break;
         case 'startNative': case 'startNativeCanvas': r = {ok: true, started: true}; break;
         case 'chooseFolder': r = {ok: true, path: folders[folderIndex++ % folders.length]}; break;
-        case 'openFolder': r = {ok: true}; break;
+        case 'openFolder': case 'openFile': r = {ok: true}; break;
         case 'environment': r = {ok: true, photoshop: '21.2.4', os: 'Windows/64 10.0', openDocuments: 1, document: {name: ps.docName + '.psd', width: ps.docW, height: ps.docH, fileMB: 3120, layers: 1846, bits: 'BitsPerChannelType.EIGHT'}}; break;
         case 'convertSuperPNG': r = {ok: true}; break;
         default: r = {ok: false, message: 'mock: ' + script};
@@ -63,9 +66,17 @@
     basename: function (p) { var parts = String(p).replace(/[\\/]+$/, '').split(/[\\/]/); return parts[parts.length - 1]; },
     dirname: function (p) { return String(p).replace(/[\\/][^\\/]*$/, ''); }
   };
+  // Directories always "exist"; .csv files live in memory (the user glossary).
+  var memFiles = {};
+  function isFile(p) { return /\.csv$/i.test(p); }
   var fs = {
-    existsSync: function () { return true; },
-    statSync: function () { return {isDirectory: function () { return true; }, isFile: function () { return true; }, size: 0, mtimeMs: Date.now()}; },
+    existsSync: function (p) { return isFile(p) ? memFiles.hasOwnProperty(p) : true; },
+    statSync: function (p) {
+      if (isFile(p) && !memFiles.hasOwnProperty(p)) { var e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; }
+      return {isDirectory: function () { return !isFile(p); }, isFile: function () { return isFile(p); }, size: 0, mtimeMs: isFile(p) ? memFiles[p].t : Date.now()};
+    },
+    readFileSync: function (p) { var text = memFiles[p].text; return {toString: function () { return text; }}; },
+    writeFileSync: function (p, text) { memFiles[p] = {text: String(text), t: Date.now() + Math.random()}; },
     readdirSync: function () { return []; }, mkdirSync: function () {}, appendFileSync: function () {}
   };
   var os = {platform: function () { return 'win32'; }, release: function () { return '10.0.19045'; }, tmpdir: function () { return 'C:\\Users\\设计\\AppData\\Local\\Temp'; }};
@@ -123,13 +134,16 @@
     new Function('module', 'exports', 'require', 'Buffer', text)(module, module.exports, function (dep) { return cache[dep.replace(/^\.\//, '').replace(/\.js$/, '')]; }, {alloc: function () { return {}; }});
     cache[name] = module.exports;
   }
-  var real = ['rules', 'logger', 'naming', 'selection', 'settings', 'output-files', 'export-job', 'diagnostics'];
+  var real = ['rules', 'logger', 'naming', 'selection', 'settings', 'output-files', 'export-job', 'diagnostics', 'translate'];
+  var data = {};
 
   function boot() {
     return fetchText(BASE + 'index.html').then(function (html) {
       var doc = new DOMParser().parseFromString(html, 'text/html');
       Array.prototype.forEach.call(doc.body.querySelectorAll('script'), function (s) { s.parentNode.removeChild(s); });
       document.body.innerHTML = doc.body.innerHTML;
+      return Promise.all(['glossary.csv', 'dict.json'].map(function (n) { return fetchText(BASE + 'data/' + n).then(function (t) { data[n] = t; }); }));
+    }).then(function () {
       return Promise.all(real.map(function (n) { return fetchText(BASE + 'js/' + n + '.js').then(function (t) { return [n, t]; }); }));
     }).then(function (texts) {
       texts.forEach(function (pair) { define(pair[0], pair[1]); });
@@ -145,7 +159,8 @@
       window.Align4Modules = {fs: fs, path: path, os: os, env: {}, rules: cache.rules, png: png, outputFiles: outputFiles,
         superPNG: {encode: function (o, data, enabled, cb) { setTimeout(function () { cb(null, data); }, 900); }},
         nativeExport: nativeExport, exportJob: cache['export-job'], logger: cache.logger, diagnostics: diagnostics,
-        naming: cache.naming, selection: cache.selection, settings: cache.settings};
+        naming: cache.naming, selection: cache.selection, settings: cache.settings, translate: cache.translate,
+        readData: function (n) { return data[n]; }};
       window.__adobe_cep__ = bridge;
       try {
         if (!localStorage.getItem('align4-settings-v2')) {
