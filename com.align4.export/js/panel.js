@@ -211,8 +211,7 @@
     // selection changes / reset, and never interrupts an IME composition.
     if (el.exportName.value !== nm.value) { el.exportName.value = nm.value; }
     el.exportName.parentNode.className = 'field name-field' + (nm.edited ? ' custom' : '');
-    el.resetName.disabled = !nm.edited || !!job;
-    el.resetName.textContent = '用图层名';
+    el.resetName.hidden = !nm.edited; el.resetName.disabled = !!job;
     var zh = M.naming.normalize(el.exportName.value), note = null;
     // English row (translation on): automatic English with source marks, or the user's own English.
     el.englishRow.hidden = !S.translate;
@@ -226,16 +225,19 @@
       if (overriding) { if (document.activeElement !== el.englishName) { el.englishName.value = englishOverride.value; } }
       else if (auto) {
         var counts = {dict: 0, none: 0};
+        if (el.prefix.value) { el.englishAuto.appendChild(make('span', 'fixed', el.prefix.value)); }
         auto.parts.forEach(function (p, i) {
-          if (i) { el.englishAuto.appendChild(document.createTextNode('_')); }
+          if (i) { el.englishAuto.appendChild(document.createTextNode('_')); el.englishAuto.appendChild(make('wbr')); }
           var span = make('span', p.source === 'dict' || p.source === 'none' ? 'part-' + p.source : null, p.out);
           span.title = p.src + ' → ' + p.out + '（' + ({user: '我的术语表', builtin: '内置术语表', dict: '离线词典，建议核对', none: '没有找到译法', ascii: '原文'}[p.source]) + '）';
           if (counts[p.source] != null) { counts[p.source]++; }
           el.englishAuto.appendChild(span);
         });
+        el.englishAuto.appendChild(make('wbr')); el.englishAuto.appendChild(make('span', 'fixed', '.png'));
         note = counts.dict || counts.none ? counts : null;
       } else { el.englishAuto.appendChild(make('span', 'empty', translatorError ? '翻译数据加载失败' : '—')); }
     }
+    el.fileName.parentNode.hidden = S.translate; // with translation on, the English box is the file name
     clear(el.fileName);
     if (!current) { el.fileName.textContent = '—'; }
     else if (!zh) { el.fileName.appendChild(make('span', 'warn', '请填写导出名称')); }
@@ -243,12 +245,14 @@
     el.fileName.title = (el.fileName.textContent || '') + '（同名文件不会覆盖，自动追加 -2、-3…）';
     // The note line is reserved while translation is on, so the layout never jumps.
     clear(el.translateNote); el.translateNote.hidden = !S.translate;
-    if (note) {
-      if (note.dict) { el.translateNote.appendChild(make('i', 'k-dict', '黄色 ' + note.dict + ' 个来自离线词典，建议核对')); }
+    if (S.translate && englishOverride) {
+      el.translateNote.appendChild(document.createTextNode((el.prefix.value ? '前缀和 .png 会自动加上。' : '.png 会自动加上。') + 'Enter 导出，Esc 恢复'));
+    } else if (note) {
+      if (note.dict) { el.translateNote.appendChild(make('i', 'k-dict', '黄色 ' + note.dict + ' 个是词典译法，建议核对')); }
       if (note.dict && note.none) { el.translateNote.appendChild(document.createTextNode('；')); }
-      if (note.none) { el.translateNote.appendChild(make('i', 'k-none', '红色 ' + note.none + ' 个没找到，保留中文')); }
-      el.translateNote.appendChild(document.createTextNode('。点“改”修改英文，导出后会记到我的术语表。'));
+      if (note.none) { el.translateNote.appendChild(make('i', 'k-none', '红色 ' + note.none + ' 个没找到')); }
     }
+    el.translateNote.title = note ? '点“修改”改英文，导出后会记到我的术语表' : '';
     el.translate.checked = S.translate;
     el.translate.disabled = !!job;
     el.clearPrefix.hidden = !el.prefix.value;
@@ -373,6 +377,7 @@
     el.lockSize.title = S.sizeLocked ? '已固定：之后每张切图都按这个尺寸输出。点击解除' : lockable ? '固定后，之后的每张切图都按这个尺寸输出' : '先填写宽或高，再点固定';
     el.sizeGroup.className = 'group' + (S.sizeLocked ? ' size-locked' : '');
     setText(el.sizeHint, S.sizeLocked ? '已固定，切换对象后保持不变' : '留空自动补齐；填写的尺寸只用于当前对象');
+    el.sizeHint.title = el.sizeHint.textContent;
     el.sizeHint.className = 'muted' + (S.sizeLocked ? ' locked' : '');
     el.anchorCenter.disabled = busy; el.anchorTopLeft.disabled = busy;
     el.anchorCenter.setAttribute('aria-checked', String(S.anchor === 'center'));
@@ -642,7 +647,11 @@
     el.englishAuto.addEventListener('click', editEnglish);
     el.englishAuto.addEventListener('keydown', function (e) { if (e.keyCode === 13 || e.keyCode === 32) { editEnglish(); } });
     ['input', 'change', 'compositionend', 'keyup'].forEach(function (type) {
-      el.englishName.addEventListener(type, function () { if (englishOverride && englishOverride.value !== el.englishName.value) { englishOverride.value = el.englishName.value; renderNaming(); } });
+      el.englishName.addEventListener(type, function () {
+        var v = el.englishName.value.replace(/[\r\n]+/g, '');
+        if (v !== el.englishName.value) { el.englishName.value = v; }
+        if (englishOverride && englishOverride.value !== v) { englishOverride.value = v; renderNaming(); }
+      });
     });
     el.englishName.addEventListener('blur', function () {
       // An empty edit, or one identical to the automatic English, is not an override.
@@ -651,7 +660,7 @@
       render();
     });
     el.englishName.addEventListener('keydown', function (e) {
-      if (e.keyCode === 13) { var d = recentDirectory(); if (d) { exportTo(d); } }
+      if (e.keyCode === 13) { e.preventDefault(); var d = recentDirectory(); if (d) { exportTo(d); } } // no line breaks in a file name
       else if (e.keyCode === 27) { englishOverride = null; render(); }
     });
     el.englishReset.addEventListener('click', function () { englishOverride = null; render(); });
@@ -701,7 +710,7 @@
     el.exportName.addEventListener('keydown', function (e) {
       if (e.keyCode === 13) { nameChanged(); var d = recentDirectory(); if (d) { exportTo(d); } }
     });
-    el.resetName.addEventListener('click', function () { namer.reset(); el.exportName.value = namer.state().value; render(); });
+    el.resetName.addEventListener('click', function () { namer.reset(); el.exportName.value = namer.state().value; render(); el.exportName.focus(); });
     document.addEventListener('visibilitychange', function () { if (!document.hidden && tracker) { tracker.poke(); } });
     window.addEventListener('focus', function () { existsCache = {}; if (S.translate && translator) { renderNaming(); } if (tracker) { tracker.poke(); } });
     window.addEventListener('beforeunload', cleanup);

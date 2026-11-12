@@ -231,7 +231,7 @@ test('translation: a typed Chinese name becomes an English file name; typed Engl
   assert.equal(p.nodes.englishRow.hidden, false);
   p.nodes.exportName.value = '聊天 装饰 气泡'; p.nodes.exportName.fire('input');
   await wait(20);
-  assert.equal(text(p.nodes.englishAuto), 'chat_deco_bubble');
+  assert.equal(text(p.nodes.englishAuto), 'chat_deco_bubble.png');
   assert.equal(p.nodes.fileName.textContent, 'chat_deco_bubble.png');
   p.exportButton().fire('click');
   await until(() => fs.readdirSync(p.out).length === 1);
@@ -244,8 +244,8 @@ test('translation: fixing the English in its own row is remembered for next time
   const dir = appdata(t);
   const p = boot(t, {settings: {translate: true}});
   p.select({token: '1|8|1', name: '头像闪光', kind: '图层', revision: '3'});
-  await until(() => text(p.nodes.englishAuto) === 'avatar_flash');
-  assert.match(text(p.nodes.translateNote), /离线词典/);
+  await until(() => text(p.nodes.englishAuto) === 'avatar_flash.png');
+  assert.match(text(p.nodes.translateNote), /词典译法/);
   p.nodes.englishEdit.fire('click');
   assert.equal(p.nodes.englishName.hidden, false); assert.equal(p.nodes.englishName.value, 'avatar_flash');
   p.nodes.englishName.value = 'avatar_shine'; p.nodes.englishName.fire('input');
@@ -258,6 +258,6 @@ test('translation: fixing the English in its own row is remembered for next time
   await until(() => fs.existsSync(glossary));
   assert.match(fs.readFileSync(glossary, 'utf8'), /闪光,shine/);
   p.select({token: '1|9|1', name: '按钮闪光', kind: '图层', revision: '3'});
-  await until(() => text(p.nodes.englishAuto) === 'btn_shine');
+  await until(() => text(p.nodes.englishAuto) === 'btn_shine.png');
   assert.equal(p.nodes.englishName.hidden, true, 'a new name starts from the automatic English again');
 });

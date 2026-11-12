@@ -27,21 +27,19 @@
   <main class="settings">
    <section class="group">
     <div class="group-head"><h2>切图名</h2>
-     <label class="toggle-row small translate-toggle" title="把名称框里的中文离线翻译成英文：我的术语表 → 内置术语表 → 离线词典；查不到的保留中文"><input id="translate" type="checkbox"><span class="toggle" aria-hidden="true"></span><span>翻译成英文</span></label>
      <button id="openGlossary" class="link-button" title="打开“我的术语表”，可以自己添加或修改译法">术语表</button>
-     <button id="resetName" class="link-button" disabled>用图层名</button></div>
+     <label class="toggle-row small translate-toggle" title="把名称框里的中文离线翻译成英文：我的术语表 → 内置术语表 → 离线词典；查不到的保留中文"><input id="translate" type="checkbox"><span class="toggle" aria-hidden="true"></span><span>翻译成英文</span></label></div>
     <div class="name-row">
      <div class="field prefix-field"><input id="prefix" type="text" maxlength="32" placeholder="前缀" autocomplete="off" spellcheck="false" aria-label="文件名前缀"><button id="clearPrefix" class="field-clear" title="清空前缀" aria-label="清空前缀">×</button></div>
-     <div class="field name-field"><input id="exportName" type="text" maxlength="120" placeholder="导出名称" autocomplete="off" spellcheck="false" aria-label="导出名称" title="按 Enter 导出到最近使用的目录"></div>
+     <div class="field name-field"><input id="exportName" type="text" maxlength="120" placeholder="导出名称" autocomplete="off" spellcheck="false" aria-label="导出名称" title="按 Enter 导出到最近使用的目录"><button id="resetName" class="field-action" title="恢复为当前图层名" hidden>用图层名</button></div>
     </div>
     <div id="englishRow" class="english-row" hidden>
-     <span class="english-label">英文</span>
      <div class="english-box">
-      <div id="englishAuto" class="english-auto" tabindex="0" title="点击修改英文"></div>
-      <input id="englishName" class="english-input" type="text" maxlength="120" autocomplete="off" spellcheck="false" hidden aria-label="英文切图名" title="按 Enter 导出到最近使用的目录；Esc 恢复自动翻译">
+      <div id="englishAuto" class="english-auto" tabindex="0" title="导出的文件名。点击修改英文"></div>
+      <textarea id="englishName" class="english-input" rows="2" maxlength="120" autocomplete="off" spellcheck="false" hidden aria-label="英文切图名" title="按 Enter 导出到最近使用的目录；Esc 恢复自动翻译"></textarea>
      </div>
-     <button id="englishEdit" class="link-button">改</button>
-     <button id="englishReset" class="link-button" hidden title="放弃修改，恢复自动翻译">恢复</button>
+     <button id="englishEdit" class="ghost-button english-button" title="直接修改英文，中文不变；导出后会记到我的术语表">修改</button>
+     <button id="englishReset" class="ghost-button english-button" hidden title="放弃修改，恢复自动翻译">恢复</button>
     </div>
     <p class="file-preview"><span id="fileName">—</span></p>
     <p id="translateNote" class="translate-note" hidden></p>
