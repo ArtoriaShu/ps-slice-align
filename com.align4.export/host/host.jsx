@@ -1,5 +1,7 @@
 ﻿/* Native selected-object PNG export. No temporary Photoshop documents. */
-var Align4 = (function () {
+// Versioned global: 1.x panels define `Align4` in the same Photoshop script engine,
+// so 2.x uses its own name and both can be installed side by side.
+var Align4v2 = (function () {
     function sid(s) { return stringIDToTypeID(s); }
     function quote(s) { return '"' + String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\x00-\x1f\u2028\u2029]/g, function (c) { return '\\u' + ('0000' + c.charCodeAt(0).toString(16)).slice(-4); }) + '"'; }
     function json(v) {
@@ -40,11 +42,36 @@ var Align4 = (function () {
         } catch (e) {}
         return null;
     }
+    function number(desc, key) { try { return desc.getUnitDoubleValue(sid(key)); } catch (e) { return desc.getDouble(sid(key)); } }
+    // Approximate size from the layer bounds (or artboard rectangle): instant, no Generator.
+    // The exact size still comes from the exported PNG.
+    // Cheap, but guarded for very large documents: computed once per object + history
+    // state (the panel polls every ~1.2s), and switched off for a document whose first
+    // lookups turn out slow.
+    var estimateCache = {key: null, w: 0, h: 0}, slowDocs = {};
+    function estimate(result, rev) {
+        if (slowDocs[result.docId]) { result.estSkipped = true; return; }
+        var key = result.token + '|' + rev;
+        if (estimateCache.key === key) { if (estimateCache.w) { result.estWidth = estimateCache.w; result.estHeight = estimateCache.h; } return; }
+        var started = new Date().getTime(), w = 0, h = 0;
+        try {
+            var rect = result.kind === '画板' ? property('artboard').getObjectValue(sid('artboard')).getObjectValue(sid('artboardRect'))
+                                              : property('bounds').getObjectValue(sid('bounds'));
+            w = Math.round(number(rect, 'right') - number(rect, 'left')); h = Math.round(number(rect, 'bottom') - number(rect, 'top'));
+        } catch (e) {}
+        var ms = new Date().getTime() - started;
+        if (ms > 250) { slowDocs[result.docId] = true; result.estSkipped = true; result.estMs = ms; return; }
+        if (!(w > 0 && h > 0)) { w = 0; h = 0; }
+        estimateCache = {key: key, w: w, h: h};
+        if (w) { result.estWidth = w; result.estHeight = h; }
+    }
     function meta() {
         var result = token(); result.name = property('name').getString(sid('name'));
         result.kind = property('layerSection').getEnumerationValue(sid('layerSection')) === sid('layerSectionStart') ? '图层组' : '图层';
         try { var a = property('artboardEnabled'); if (a.hasKey(sid('artboardEnabled')) && a.getBoolean(sid('artboardEnabled'))) { result.kind = '画板'; } } catch (e) {}
-        result.revision = revision(); result.ok = true; return result;
+        result.revision = revision();
+        estimate(result, result.revision);
+        result.ok = true; return result;
     }
     function selectionToken() { try { var t = token(); t.ok = true; return json(t); } catch (e) { return error(e); } }
     function describeSelection() { try { return json(meta()); } catch (e) { return error(e); } }
@@ -122,13 +149,39 @@ var Align4 = (function () {
             return json({ok:true});
         } catch (e) { return error(e); }
     }
+    function openFile(path) {
+        try {
+            var file = new File(path);
+            if (!file.exists) { throw new Error('文件不存在。'); }
+            if (!file.execute()) { throw new Error('无法打开文件。'); }
+            return json({ok:true});
+        } catch (e) { return error(e); }
+    }
     function eventIDs() {
         var names = ['slct','move','Trnf','setd','Mk  ','Dlt ','Shw ','Hd  ','undo','redo'], result = [], i;
         for (i = 0; i < names.length; i++) { result.push({id:charIDToTypeID(names[i]), edit:names[i] !== 'slct'}); }
         return json({ok:true, events:result});
     }
     function diagnose() {
-        try { return json({ok:true, data:{plugin:'1.11.1 native PNG', photoshop:String(app.version), selection:meta(), sizeSource:'实际原生 PNG 的 IHDR，不使用图层 bounds'}}); } catch (e) { return error(e); }
+        try { return json({ok:true, data:{photoshop:String(app.version), selection:meta(), sizeSource:'实际原生 PNG 的 IHDR，不使用图层 bounds'}}); } catch (e) { return error(e); }
     }
-    return {selectionToken:selectionToken, describeSelection:describeSelection, describeDocument:describeDocument, startNative:startNative, startNativeCanvas:startNativeCanvas, convertSuperPNG:convertSuperPNG, chooseFolder:chooseFolder, openFolder:openFolder, eventIDs:eventIDs, diagnose:diagnose};
+    // Read-only facts for the diagnostic bundle. Every field is optional.
+    function environment() {
+        var out = {ok:true, photoshop:String(app.version), os:String($.os), openDocuments:app.documents.length};
+        try { out.freeMemoryMB = Math.round(app.freeMemory / 1048576); } catch (e) {}
+        if (!app.documents.length) { return json(out); }
+        var doc = app.activeDocument, d = {name:String(doc.name)};
+        try { d.width = Math.round(doc.width.as('px')); d.height = Math.round(doc.height.as('px')); } catch (e) {}
+        try { d.mode = String(doc.mode); d.bits = String(doc.bitsPerChannel); } catch (e) {}
+        try { var f = new File(doc.fullName); d.fileMB = Math.round(f.length / 1048576); } catch (e) { d.fileMB = null; d.unsaved = true; }
+        try { d.saved = doc.saved; } catch (e) {}
+        try {
+            var r = new ActionReference(); r.putProperty(sid('property'), sid('numberOfLayers')); r.putEnumerated(sid('document'), sid('ordinal'), sid('targetEnum'));
+            d.layers = executeActionGet(r).getInteger(sid('numberOfLayers'));
+        } catch (e) {}
+        try { d.selection = meta(); } catch (e) { d.selection = String(e.message || e); }
+        out.document = d;
+        return json(out);
+    }
+    return {selectionToken:selectionToken, describeSelection:describeSelection, describeDocument:describeDocument, startNative:startNative, startNativeCanvas:startNativeCanvas, convertSuperPNG:convertSuperPNG, chooseFolder:chooseFolder, openFolder:openFolder, openFile:openFile, eventIDs:eventIDs, diagnose:diagnose, environment:function () { try { return environment(); } catch (e) { return error(e); } }};
 }());
